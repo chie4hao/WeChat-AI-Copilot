@@ -3,6 +3,7 @@ gemini:
   model: "gemini-2.0-flash"
   candidate_count: 3
   temperature: 0.9
+  stream: true   # true=流式（逐字显示），false=等待完整结果后显示
 
 server:
   port: 3000

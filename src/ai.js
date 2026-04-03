@@ -14,9 +14,9 @@ function getClient() {
 }
 
 function getGeminiConfig() {
-  const { model, candidate_count, temperature } = config.get().gemini;
+  const { model, candidate_count, temperature, stream = true } = config.get().gemini;
   const systemInstruction = config.get().prompt;
-  return { model, candidate_count, temperature, systemInstruction };
+  return { model, candidate_count, temperature, stream, systemInstruction };
 }
 
 /**
@@ -115,27 +115,17 @@ async function followUp(contactId, userText, { onChunk, onComplete, onError } = 
 }
 
 /**
- * 内部：发送消息并处理流式响应
+ * 内部：发送消息，根据配置走流式或非流式
  */
 async function streamMessage(session, message, { onChunk, onComplete, onError } = {}) {
-  let buffer = '';
+  const { stream } = getGeminiConfig();
 
   try {
-    const stream = await session.chat.sendMessageStream(
-      { message },
-      { signal: session.abortController.signal },
-    );
-
-    for await (const chunk of stream) {
-      const text = chunk.text ?? '';
-      if (text) {
-        buffer += text;
-        onChunk?.(text);
-      }
+    if (stream) {
+      await _streamingRequest(session, message, { onChunk, onComplete });
+    } else {
+      await _blockingRequest(session, message, { onComplete });
     }
-
-    const result = JSON.parse(buffer);
-    onComplete?.(result);
   } catch (err) {
     if (err.name === 'AbortError') {
       // 主动取消，不作为错误处理
@@ -143,6 +133,34 @@ async function streamMessage(session, message, { onChunk, onComplete, onError } 
     }
     onError?.(err);
   }
+}
+
+async function _streamingRequest(session, message, { onChunk, onComplete }) {
+  let buffer = '';
+
+  const stream = await session.chat.sendMessageStream(
+    { message },
+    { signal: session.abortController.signal },
+  );
+
+  for await (const chunk of stream) {
+    const text = chunk.text ?? '';
+    if (text) {
+      buffer += text;
+      onChunk?.(text);
+    }
+  }
+
+  onComplete?.(JSON.parse(buffer));
+}
+
+async function _blockingRequest(session, message, { onComplete }) {
+  const response = await session.chat.sendMessage(
+    { message },
+    { signal: session.abortController.signal },
+  );
+
+  onComplete?.(JSON.parse(response.text));
 }
 
 export { generateSuggestions, followUp, cancelRequest, resetSession };
