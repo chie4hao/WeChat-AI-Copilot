@@ -24,6 +24,7 @@ function initSchema() {
       wxid TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
       avatar TEXT,
+      notes TEXT,
       last_message TEXT,
       last_time INTEGER,
       has_pending_suggestion INTEGER DEFAULT 0
@@ -84,6 +85,12 @@ function getContactByWxid(wxid) {
   return getDb()
     .prepare('SELECT * FROM contacts WHERE wxid = ?')
     .get(wxid);
+}
+
+function updateContactNotes(contactId, notes) {
+  getDb()
+    .prepare('UPDATE contacts SET notes = ? WHERE id = ?')
+    .run(notes || null, contactId);
 }
 
 function setPendingSuggestion(contactId, value) {
@@ -181,6 +188,7 @@ export {
   upsertContact,
   getContacts,
   getContactByWxid,
+  updateContactNotes,
   setPendingSuggestion,
   insertMessage,
   getRecentMessages,

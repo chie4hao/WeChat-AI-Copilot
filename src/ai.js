@@ -24,16 +24,20 @@ function getGeminiConfig() {
  *
  * @param {Array}  chatHistory      来自 db.getRecentMessages() 的消息数组
  * @param {number} candidateCount   候选数量
+ * @param {string} notes            联系人备注（可选）
  */
-function buildUserMessage(chatHistory, candidateCount) {
+function buildUserMessage(chatHistory, candidateCount, notes) {
   const lines = chatHistory.map(m => `${m.is_self ? '我' : '她'}: ${m.content}`);
-  return [
-    '以下是我们最近的聊天记录：',
-    '',
-    ...lines,
-    '',
-    `请分析当前对话情况并给出 ${candidateCount} 条候选回复。`,
-  ].join('\n');
+  const parts = [];
+
+  if (notes) {
+    parts.push(`【关于这个人】\n${notes}\n`);
+  }
+
+  parts.push('以下是我们最近的聊天记录：', '', ...lines, '');
+  parts.push(`请分析当前对话情况并给出 ${candidateCount} 条候选回复。`);
+
+  return parts.join('\n');
 }
 
 /**
@@ -86,10 +90,10 @@ function cancelRequest(contactId) {
  * @param {Function} callbacks.onComplete  生成完成时回调，参数为解析后的 { message, candidates }
  * @param {Function} callbacks.onError     出错时回调
  */
-async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete, onError } = {}) {
+async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete, onError } = {}, notes = '') {
   const session = resetSession(contactId);
   const { candidate_count } = getGeminiConfig();
-  const userMessage = buildUserMessage(chatHistory, candidate_count);
+  const userMessage = buildUserMessage(chatHistory, candidate_count, notes);
 
   await _sendMessage(session, userMessage, { onChunk, onComplete, onError });
 }
