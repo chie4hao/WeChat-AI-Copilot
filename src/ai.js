@@ -32,7 +32,7 @@ function buildUserMessage(chatHistory, candidateCount) {
     '',
     ...lines,
     '',
-    `请根据以上对话，给出 ${candidateCount} 条候选回复建议。`,
+    `请分析当前对话情况并给出 ${candidateCount} 条候选回复。`,
   ].join('\n');
 }
 
@@ -53,10 +53,10 @@ function resetSession(contactId) {
       responseSchema: {
         type: 'object',
         properties: {
-          analysis:   { type: 'string' },
-          candidates: { type: 'array', items: { type: 'string' } },
+          message:    { type: 'string' }, // AI 自由发挥的分析和建议
+          candidates: { type: 'array', items: { type: 'string' } }, // 候选回复
         },
-        required: ['analysis', 'candidates'],
+        required: ['message', 'candidates'],
       },
     },
   });
@@ -82,8 +82,8 @@ function cancelRequest(contactId) {
  * @param {number}   contactId
  * @param {Array}    chatHistory   db.getRecentMessages() 的结果
  * @param {object}   callbacks
- * @param {Function} callbacks.onChunk     每收到一个文本 chunk 时回调
- * @param {Function} callbacks.onComplete  生成完成时回调，参数为解析后的 { analysis, candidates }
+ * @param {Function} callbacks.onChunk     每收到一个文本 chunk 时回调（流式模式）
+ * @param {Function} callbacks.onComplete  生成完成时回调，参数为解析后的 { message, candidates }
  * @param {Function} callbacks.onError     出错时回调
  */
 async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete, onError } = {}) {
@@ -91,7 +91,7 @@ async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete
   const { candidate_count } = getGeminiConfig();
   const userMessage = buildUserMessage(chatHistory, candidate_count);
 
-  await streamMessage(session, userMessage, { onChunk, onComplete, onError });
+  await _sendMessage(session, userMessage, { onChunk, onComplete, onError });
 }
 
 /**
@@ -111,13 +111,13 @@ async function followUp(contactId, userText, { onChunk, onComplete, onError } = 
   // 取消当前请求，但保留 chat（保持追问上下文）
   cancelRequest(contactId);
 
-  await streamMessage(session, userText, { onChunk, onComplete, onError });
+  await _sendMessage(session, userText, { onChunk, onComplete, onError });
 }
 
 /**
  * 内部：发送消息，根据配置走流式或非流式
  */
-async function streamMessage(session, message, { onChunk, onComplete, onError } = {}) {
+async function _sendMessage(session, message, { onChunk, onComplete, onError } = {}) {
   const { stream } = getGeminiConfig();
 
   try {
@@ -128,8 +128,7 @@ async function streamMessage(session, message, { onChunk, onComplete, onError } 
     }
   } catch (err) {
     if (err.name === 'AbortError') {
-      // 主动取消，不作为错误处理
-      return;
+      return; // 主动取消，不作为错误处理
     }
     onError?.(err);
   }
