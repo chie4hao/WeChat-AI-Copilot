@@ -1,6 +1,8 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '..', 'data.db');
 
 let db;
@@ -44,19 +46,12 @@ function initSchema() {
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
 
-    CREATE TABLE IF NOT EXISTS ai_rounds (
+    -- type = 'ai_round': content 是 JSON { analysis, candidates[] }
+    -- type = 'user':     content 是用户追问的文本
+    CREATE TABLE IF NOT EXISTS ai_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL,
-      analysis TEXT,
-      candidates TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS followup_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER NOT NULL,
-      role TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('ai_round', 'user')),
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
@@ -64,7 +59,7 @@ function initSchema() {
   `);
 }
 
-// ── Contacts ────────────────────────────────────────────────
+// ── Contacts ─────────────────────────────────────────────────
 
 function upsertContact({ wxid, name, avatar }) {
   const db = getDb();
@@ -97,7 +92,7 @@ function setPendingSuggestion(contactId, value) {
     .run(value ? 1 : 0, contactId);
 }
 
-// ── Messages ─────────────────────────────────────────────────
+// ── Messages ──────────────────────────────────────────────────
 
 function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' }) {
   const db = getDb();
@@ -122,23 +117,17 @@ function getRecentMessages(contactId, limit = 30) {
   `).all(contactId, limit).reverse();
 }
 
-// ── AI Sessions ──────────────────────────────────────────────
+// ── AI Sessions ───────────────────────────────────────────────
 
 function resetAiSession(contactId) {
   const db = getDb();
-  const now = Date.now();
-
   const existing = db.prepare('SELECT id FROM ai_sessions WHERE contact_id = ?').get(contactId);
   if (existing) {
-    db.prepare('DELETE FROM followup_messages WHERE session_id = ?').run(existing.id);
-    db.prepare('DELETE FROM ai_rounds WHERE session_id = ?').run(existing.id);
+    db.prepare('DELETE FROM ai_messages WHERE session_id = ?').run(existing.id);
     db.prepare('DELETE FROM ai_sessions WHERE id = ?').run(existing.id);
   }
 
-  db.prepare(`
-    INSERT INTO ai_sessions (contact_id, created_at) VALUES (?, ?)
-  `).run(contactId, now);
-
+  db.prepare('INSERT INTO ai_sessions (contact_id, created_at) VALUES (?, ?)').run(contactId, Date.now());
   return db.prepare('SELECT * FROM ai_sessions WHERE contact_id = ?').get(contactId);
 }
 
@@ -148,58 +137,46 @@ function getAiSession(contactId) {
     .get(contactId);
 }
 
-// ── AI Rounds（每次生成的分析 + 候选） ──────────────────────
+// ── AI Messages ───────────────────────────────────────────────
 
 function insertAiRound({ sessionId, analysis, candidates }) {
-  const db = getDb();
-  const result = db.prepare(`
-    INSERT INTO ai_rounds (session_id, analysis, candidates, created_at)
-    VALUES (@sessionId, @analysis, @candidates, @createdAt)
-  `).run({
-    sessionId,
-    analysis: analysis || null,
-    candidates: JSON.stringify(candidates),
-    createdAt: Date.now(),
-  });
-  return result.lastInsertRowid;
-}
-
-function getAiRounds(sessionId) {
-  return getDb()
-    .prepare('SELECT * FROM ai_rounds WHERE session_id = ? ORDER BY created_at ASC')
-    .all(sessionId)
-    .map(row => ({ ...row, candidates: JSON.parse(row.candidates) }));
-}
-
-// ── Followup Messages ────────────────────────────────────────
-
-function insertFollowupMessage({ sessionId, role, content }) {
   getDb().prepare(`
-    INSERT INTO followup_messages (session_id, role, content, created_at)
-    VALUES (@sessionId, @role, @content, @createdAt)
-  `).run({ sessionId, role, content, createdAt: Date.now() });
+    INSERT INTO ai_messages (session_id, type, content, created_at)
+    VALUES (?, 'ai_round', ?, ?)
+  `).run(sessionId, JSON.stringify({ analysis: analysis || null, candidates }), Date.now());
 }
 
-function getFollowupMessages(sessionId) {
+function insertUserFollowup({ sessionId, content }) {
+  getDb().prepare(`
+    INSERT INTO ai_messages (session_id, type, content, created_at)
+    VALUES (?, 'user', ?, ?)
+  `).run(sessionId, content, Date.now());
+}
+
+function getAiMessages(sessionId) {
   return getDb()
-    .prepare('SELECT * FROM followup_messages WHERE session_id = ? ORDER BY created_at ASC')
-    .all(sessionId);
+    .prepare('SELECT * FROM ai_messages WHERE session_id = ? ORDER BY id ASC')
+    .all(sessionId)
+    .map(row => {
+      if (row.type === 'ai_round') {
+        return { ...row, content: JSON.parse(row.content) };
+      }
+      return row;
+    });
 }
 
-// ── 加载完整 AI Session（供前端切换联系人时使用） ────────────
+// ── 完整 AI Session（供前端切换联系人时加载） ─────────────────
 
 function getFullAiSession(contactId) {
   const session = getAiSession(contactId);
   if (!session) return null;
-
   return {
     session,
-    rounds: getAiRounds(session.id),
-    followups: getFollowupMessages(session.id),
+    messages: getAiMessages(session.id),
   };
 }
 
-module.exports = {
+export {
   getDb,
   upsertContact,
   getContacts,
@@ -210,8 +187,7 @@ module.exports = {
   resetAiSession,
   getAiSession,
   insertAiRound,
-  getAiRounds,
-  insertFollowupMessage,
-  getFollowupMessages,
+  insertUserFollowup,
+  getAiMessages,
   getFullAiSession,
 };

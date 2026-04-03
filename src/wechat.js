@@ -1,4 +1,4 @@
-const { EventEmitter } = require('events');
+import { EventEmitter } from 'events';
 
 /**
  * 统一的消息格式，无论来自 Mock 还是 WeChatFerry
@@ -48,7 +48,7 @@ class WeChatClient extends EventEmitter {
    *
    * @param {object} param
    * @param {string} param.wxid      联系人 wxid（Mock 下可自定义）
-   * @param {string} param.name      联系人名称
+   * @param {string} param.name      联系人显示名称
    * @param {string} param.content   消息内容
    * @param {boolean} param.isSelf   是否是自己发的
    */
@@ -70,7 +70,7 @@ class WeChatClient extends EventEmitter {
   _startWeChatFerry() {
     // TODO: Windows 环境下接入 WeChatFerry
     //
-    // const { Wcf } = require('wcferry');
+    // import { Wcf } from 'wcferry';
     // this.wcf = new Wcf();
     // this.wcf.start();
     //
@@ -98,4 +98,4 @@ class WeChatClient extends EventEmitter {
   }
 }
 
-module.exports = new WeChatClient();
+export default new WeChatClient();

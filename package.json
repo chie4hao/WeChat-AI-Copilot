@@ -2,6 +2,7 @@
   "name": "wechat-ai-copilot",
   "version": "0.1.0",
   "description": "AI reply assistant for WeChat - suggests replies, human reviews and sends",
+  "type": "module",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
