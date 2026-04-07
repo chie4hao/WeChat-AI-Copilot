@@ -271,44 +271,57 @@
 
     // ── 解析微信聊天记录 ────────────────────────────────────────
     function parseWeChatLog(text) {
-      const lines = text.split('\n');
+      // 实际格式：
+      //   发送者  HH:MM        ← 发送者 + 时间同行，多个空格分隔
+      //   （空行）
+      //   消息内容
+      //   （空行）
+      // 日期分隔线：—————  2026-04-06  —————
+
       const names = new Set();
       const messages = [];
 
-      // 跳过头部（"XX 和 YY 在微信上的聊天记录"）和分隔线
-      let started = false;
+      // 时间模式：HH:MM 或 H:MM
+      const TIME_RE = /\s{2,}(\d{1,2}:\d{2})\s*$/;
+      // 日期分隔线
+      const DATE_SEP_RE = /^[—\-─\s]+(\d{4}[-\/年]\d{1,2}[-\/月]\d{1,2}[日]?)[—\-─\s]*$/;
 
-      for (const line of lines) {
+      const lines = text.split('\n');
+      let i = 0;
+
+      // 跳过头部（含"在微信上的聊天记录"的行）
+      while (i < lines.length && !lines[i].includes('在微信上的聊天记录')) i++;
+      i++; // 跳过头部行本身
+
+      while (i < lines.length) {
+        const line = lines[i];
         const trimmed = line.trim();
+        i++;
+
         if (!trimmed) continue;
 
-        // 分隔线
-        if (/^[-\s]+$/.test(trimmed) && trimmed.includes('-')) {
-          started = true;
+        // 日期分隔线
+        if (DATE_SEP_RE.test(trimmed)) {
+          messages.push({ type: 'time', content: trimmed.replace(/^[—\-─\s]+|[—\-─\s]+$/g, '').trim() });
           continue;
         }
 
-        if (!started) continue;
+        // 检查是否是"发送者  HH:MM"格式
+        const timeMatch = line.match(TIME_RE);
+        if (timeMatch) {
+          const sender = line.replace(TIME_RE, '').trim();
+          if (!sender) continue;
 
-        // 时间行（如 "昨天 21:38"、"2024年3月5日 14:30"、"14:30" 等）
-        if (/^(\d{1,2}:\d{2}|\d{4}[年\/\-]\d{1,2}[月\/\-]\d{1,2}[日]?|昨天|前天|星期[一二三四五六日天])/.test(trimmed)
-            && !trimmed.includes(':') || (trimmed.match(/:/g) || []).length === 1 && !trimmed.includes('：')) {
-          // 更精确的时间行检测：不包含中文冒号，且格式像时间
-          if (/^((\d{4}[年\/\-])?\d{1,2}[月\/\-]?\d{0,2}[日]?\s*)?\d{1,2}:\d{2}\s*$/.test(trimmed)
-              || /^(昨天|前天|星期[一二三四五六日天])\s*\d{1,2}:\d{2}\s*$/.test(trimmed)) {
-            messages.push({ type: 'time', content: trimmed });
-            continue;
+          // 下一条非空行是消息内容
+          while (i < lines.length && !lines[i].trim()) i++;
+          const content = lines[i] ? lines[i].trim() : '';
+          i++;
+
+          if (content) {
+            names.add(sender);
+            messages.push({ type: 'msg', sender, content });
           }
-        }
-
-        // 消息行：name: content（用英文冒号，微信导出格式是英文冒号+空格）
-        // 注意有些消息内容本身可能含冒号，所以只按第一个": "拆分
-        const colonIdx = trimmed.indexOf(': ');
-        if (colonIdx > 0) {
-          const sender = trimmed.substring(0, colonIdx);
-          const content = trimmed.substring(colonIdx + 2);
-          names.add(sender);
-          messages.push({ type: 'msg', sender, content });
+          continue;
         }
       }
 
