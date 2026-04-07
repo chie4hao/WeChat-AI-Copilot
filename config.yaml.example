@@ -1,3 +1,6 @@
+# 你的微信昵称，导入聊天记录时自动识别哪条消息是你发的
+my_name: "你的微信昵称"
+
 gemini:
   api_key: "YOUR_GEMINI_API_KEY"
   model: "gemini-2.0-flash"

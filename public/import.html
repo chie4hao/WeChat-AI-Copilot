@@ -193,9 +193,9 @@
       <button class="btn btn-secondary" id="parseBtn" style="margin-top:10px;width:100%">解析</button>
     </div>
 
-    <!-- 选择"我" -->
+    <!-- 选择"我"（仅当设置里没有填昵称时显示） -->
     <div class="import-section" id="selfSection" hidden>
-      <span class="section-label">哪个是你？点击选择</span>
+      <span class="section-label">哪个是你？点击选择（或去<a href="/settings">设置</a>填写昵称以后自动识别）</span>
       <div class="self-select" id="selfSelect"></div>
     </div>
 
@@ -228,8 +228,14 @@
     const importBtn   = document.getElementById('importBtn');
     const toastEl     = document.getElementById('toast');
 
-    let parsed = { names: [], messages: [] }; // { names: string[], messages: [{sender, content}] }
+    let parsed = { names: [], messages: [] };
     let selfName = null;
+    let configuredMyName = '';
+
+    // 读取设置里的昵称
+    fetch('/api/settings').then(r => r.json()).then(cfg => {
+      configuredMyName = cfg.my_name || '';
+    }).catch(() => {});
 
     // 从 URL 参数获取分享文本（旧路径）
     const urlText = new URLSearchParams(location.search).get('text');
@@ -340,27 +346,32 @@
         return;
       }
 
-      // 显示"选择自己"
-      selfName = null;
-      selfSelect.innerHTML = '';
-      parsed.names.forEach(name => {
-        const btn = document.createElement('button');
-        btn.className = 'self-btn';
-        btn.textContent = name;
-        btn.addEventListener('click', () => {
-          selfName = name;
-          selfSelect.querySelectorAll('.self-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          renderPreview();
+      // 尝试自动匹配昵称
+      selfName = parsed.names.find(n => n === configuredMyName) || null;
+
+      if (selfName) {
+        // 自动匹配成功，直接预览
+        selfSection.hidden = true;
+        renderPreview();
+      } else {
+        // 没有配置昵称或匹配失败，手动选择
+        selfSelect.innerHTML = '';
+        parsed.names.forEach(name => {
+          const btn = document.createElement('button');
+          btn.className = 'self-btn';
+          btn.textContent = name;
+          btn.addEventListener('click', () => {
+            selfName = name;
+            selfSelect.querySelectorAll('.self-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderPreview();
+          });
+          selfSelect.appendChild(btn);
         });
-        selfSelect.appendChild(btn);
-      });
-
-      selfSection.hidden = false;
-
-      // 如果只有两个人，提示选择
-      if (parsed.names.length === 2) {
-        showToast(`检测到 ${parsed.names.length} 个参与者，点击选择哪个是你`);
+        selfSection.hidden = false;
+        showToast(configuredMyName
+          ? `未找到昵称"${configuredMyName}"，请手动选择`
+          : '请去设置填写昵称，或手动点击选择');
       }
     });
 

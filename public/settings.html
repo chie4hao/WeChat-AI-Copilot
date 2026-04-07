@@ -254,6 +254,15 @@
 
   <div class="settings-page">
 
+    <!-- 基本信息 -->
+    <div class="section-title">基本信息</div>
+    <div class="settings-section">
+      <div class="setting-row">
+        <span class="setting-label">我的昵称</span>
+        <input class="setting-input" id="myName" type="text" placeholder="填写微信昵称，导入时自动识别">
+      </div>
+    </div>
+
     <!-- Gemini API -->
     <div class="section-title">Gemini API</div>
     <div class="settings-section">
@@ -322,6 +331,7 @@
     const $ = (s) => document.querySelector(s);
 
     const els = {
+      myName:         $('#myName'),
       apiKey:         $('#apiKey'),
       toggleKey:      $('#toggleKey'),
       model:          $('#model'),
@@ -350,6 +360,7 @@
     }
 
     function fillForm(cfg) {
+      els.myName.value         = cfg.my_name || '';
       els.apiKey.value         = cfg.gemini?.api_key || '';
       els.candidateCount.value = cfg.gemini?.candidate_count ?? 3;
       els.temperature.value    = cfg.gemini?.temperature ?? 0.9;
@@ -371,6 +382,7 @@
     // ── Save ──────────────────────────────────────────────────────
     async function saveSettings() {
       const cfg = {
+        my_name: els.myName.value.trim(),
         gemini: {
           api_key:         els.apiKey.value.trim(),
           model:           els.model.value,
