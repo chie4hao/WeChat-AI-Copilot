@@ -232,21 +232,24 @@
     let selfName = null;
     let configuredMyName = '';
 
-    // 读取设置里的昵称
-    fetch('/api/settings').then(r => r.json()).then(cfg => {
-      configuredMyName = cfg.my_name || '';
-    }).catch(() => {});
+    (async () => {
+      // 先读设置，确保昵称就绪再自动解析
+      try {
+        const cfg = await fetch('/api/settings').then(r => r.json());
+        configuredMyName = cfg.my_name || '';
+      } catch {}
 
-    // 从 URL 参数获取分享文本（旧路径）
-    const urlText = new URLSearchParams(location.search).get('text');
-    if (urlText) {
-      rawText.value = urlText;
-      setTimeout(() => parseBtn.click(), 100);
-    }
+      const params = new URLSearchParams(location.search);
 
-    // 从 IndexedDB 读取 SW 存的分享数据（Share Target 文件/文本路径）
-    if (new URLSearchParams(location.search).get('from') === 'share') {
-      (async () => {
+      // 从 URL 参数获取文本（旧路径）
+      if (params.get('text')) {
+        rawText.value = params.get('text');
+        parseBtn.click();
+        return;
+      }
+
+      // 从 IndexedDB 读取 SW 存的分享数据
+      if (params.get('from') === 'share') {
         try {
           const db = await new Promise((res, rej) => {
             const req = indexedDB.open('ai-copilot', 1);
@@ -267,13 +270,13 @@
           });
           if (all.length > 0) {
             rawText.value = all[all.length - 1].text;
-            setTimeout(() => parseBtn.click(), 100);
+            parseBtn.click();
           }
         } catch (err) {
           console.error('读取分享数据失败', err);
         }
-      })();
-    }
+      }
+    })();
 
     // ── 解析微信聊天记录 ────────────────────────────────────────
     function parseWeChatLog(text) {
