@@ -554,3 +554,26 @@ init();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
 }
+
+// PWA 安装按钮
+let _installPrompt = null;
+const installBtn = document.getElementById('installBtn');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _installPrompt = e;
+  installBtn.hidden = false;
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!_installPrompt) return;
+  _installPrompt.prompt();
+  const { outcome } = await _installPrompt.userChoice;
+  if (outcome === 'accepted') installBtn.hidden = true;
+  _installPrompt = null;
+});
+
+window.addEventListener('appinstalled', () => {
+  installBtn.hidden = true;
+  _installPrompt = null;
+});
