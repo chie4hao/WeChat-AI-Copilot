@@ -64,6 +64,9 @@ app.get('/', (_req, res) =>
 app.get('/settings', (_req, res) =>
   res.sendFile(path.join(__dirname, '..', 'public', 'settings.html')));
 
+app.get('/import', (_req, res) =>
+  res.sendFile(path.join(__dirname, '..', 'public', 'import.html')));
+
 // ── API: Contacts ─────────────────────────────────────────────
 
 app.get('/api/contacts', (_req, res) => {
@@ -127,6 +130,37 @@ app.post('/api/contacts/:id/notes', (req, res) => {
   const { notes } = req.body;
   db.updateContactNotes(contactId, notes ?? null);
   res.json({ ok: true });
+});
+
+// ── API: Import (批量导入聊天记录) ────────────────────────────
+
+app.post('/api/import', (req, res) => {
+  const { wxid, otherName, messages } = req.body;
+  if (!wxid || !otherName || !Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'wxid, otherName, messages[] are required' });
+  }
+
+  const contact = db.upsertContact({ wxid, name: otherName, avatar: null });
+  const now = Date.now();
+  let count = 0;
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m.content) continue;
+    // 时间戳按顺序递增，确保消息排序正确
+    const timestamp = now - (messages.length - i) * 1000;
+    db.insertMessage({
+      contactId: contact.id,
+      content: m.content,
+      isSelf: m.isSelf,
+      timestamp,
+      type: 'text',
+    });
+    count++;
+  }
+
+  broadcast({ type: 'contacts_update' });
+  res.json({ ok: true, count, contactId: contact.id });
 });
 
 // ── API: Mock ─────────────────────────────────────────────────

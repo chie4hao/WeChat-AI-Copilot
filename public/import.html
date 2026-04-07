@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>导入聊天记录 - AI Copilot</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { overflow: auto; }
+
+    .import-page {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    .import-section {
+      background: var(--bg-panel);
+      border-radius: 10px;
+      margin-bottom: 16px;
+      padding: 16px;
+      border: 1px solid var(--border);
+    }
+
+    .section-label {
+      font-size: 13px;
+      color: var(--text-sub);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .raw-text {
+      width: 100%;
+      min-height: 120px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      background: #f9f9f9;
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    .raw-text:focus {
+      border-color: var(--accent);
+      background: #fff;
+    }
+
+    .self-select {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .self-btn {
+      padding: 6px 16px;
+      border: 2px solid var(--border);
+      border-radius: 20px;
+      background: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .self-btn.active {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .preview-list {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 8px;
+    }
+
+    .preview-msg {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .preview-msg:last-child { border-bottom: none; }
+
+    .preview-msg .sender {
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .preview-msg .sender.is-self { color: var(--accent); }
+    .preview-msg .sender.is-other { color: #e67e22; }
+
+    .preview-msg .tag {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .preview-msg .tag.self-tag {
+      background: #e8f5e9;
+      color: var(--accent);
+    }
+
+    .preview-msg .tag.other-tag {
+      background: #fff3e0;
+      color: #e67e22;
+    }
+
+    .time-line {
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 12px;
+      padding: 8px 0;
+    }
+
+    .action-bar {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      height: 40px;
+      padding: 0 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #e8e8e8;
+      color: var(--text);
+    }
+
+    .import-stats {
+      font-size: 13px;
+      color: var(--text-sub);
+      margin-bottom: 12px;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #333;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      opacity: 0;
+      transition: transform 0.3s, opacity 0.3s;
+      z-index: 999;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <a href="/" class="header-back" style="text-decoration:none">&#8592;</a>
+    <span class="header-title">导入聊天记录</span>
+  </header>
+
+  <div class="import-page">
+
+    <!-- 原始文本 -->
+    <div class="import-section">
+      <span class="section-label">微信聊天记录文本（多选消息后分享/复制的内容）</span>
+      <textarea class="raw-text" id="rawText" placeholder="粘贴微信聊天记录..."></textarea>
+      <button class="btn btn-secondary" id="parseBtn" style="margin-top:10px;width:100%">解析</button>
+    </div>
+
+    <!-- 选择"我" -->
+    <div class="import-section" id="selfSection" hidden>
+      <span class="section-label">哪个是你？点击选择</span>
+      <div class="self-select" id="selfSelect"></div>
+    </div>
+
+    <!-- 预览 -->
+    <div class="import-section" id="previewSection" hidden>
+      <span class="section-label">消息预览</span>
+      <div class="import-stats" id="importStats"></div>
+      <div class="preview-list" id="previewList"></div>
+    </div>
+
+    <!-- 操作 -->
+    <div class="action-bar" id="actionBar" hidden>
+      <button class="btn btn-secondary" onclick="location.href='/'">取消</button>
+      <button class="btn btn-primary" id="importBtn">导入</button>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const rawText     = document.getElementById('rawText');
+    const parseBtn    = document.getElementById('parseBtn');
+    const selfSection = document.getElementById('selfSection');
+    const selfSelect  = document.getElementById('selfSelect');
+    const previewSection = document.getElementById('previewSection');
+    const previewList = document.getElementById('previewList');
+    const importStats = document.getElementById('importStats');
+    const actionBar   = document.getElementById('actionBar');
+    const importBtn   = document.getElementById('importBtn');
+    const toastEl     = document.getElementById('toast');
+
+    let parsed = { names: [], messages: [] }; // { names: string[], messages: [{sender, content}] }
+    let selfName = null;
+
+    // 从 URL 参数获取分享文本
+    const urlText = new URLSearchParams(location.search).get('text');
+    if (urlText) {
+      rawText.value = urlText;
+      // 自动解析
+      setTimeout(() => parseBtn.click(), 100);
+    }
+
+    // ── 解析微信聊天记录 ────────────────────────────────────────
+    function parseWeChatLog(text) {
+      const lines = text.split('\n');
+      const names = new Set();
+      const messages = [];
+
+      // 跳过头部（"XX 和 YY 在微信上的聊天记录"）和分隔线
+      let started = false;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // 分隔线
+        if (/^[-\s]+$/.test(trimmed) && trimmed.includes('-')) {
+          started = true;
+          continue;
+        }
+
+        if (!started) continue;
+
+        // 时间行（如 "昨天 21:38"、"2024年3月5日 14:30"、"14:30" 等）
+        if (/^(\d{1,2}:\d{2}|\d{4}[年\/\-]\d{1,2}[月\/\-]\d{1,2}[日]?|昨天|前天|星期[一二三四五六日天])/.test(trimmed)
+            && !trimmed.includes(':') || (trimmed.match(/:/g) || []).length === 1 && !trimmed.includes('：')) {
+          // 更精确的时间行检测：不包含中文冒号，且格式像时间
+          if (/^((\d{4}[年\/\-])?\d{1,2}[月\/\-]?\d{0,2}[日]?\s*)?\d{1,2}:\d{2}\s*$/.test(trimmed)
+              || /^(昨天|前天|星期[一二三四五六日天])\s*\d{1,2}:\d{2}\s*$/.test(trimmed)) {
+            messages.push({ type: 'time', content: trimmed });
+            continue;
+          }
+        }
+
+        // 消息行：name: content（用英文冒号，微信导出格式是英文冒号+空格）
+        // 注意有些消息内容本身可能含冒号，所以只按第一个": "拆分
+        const colonIdx = trimmed.indexOf(': ');
+        if (colonIdx > 0) {
+          const sender = trimmed.substring(0, colonIdx);
+          const content = trimmed.substring(colonIdx + 2);
+          names.add(sender);
+          messages.push({ type: 'msg', sender, content });
+        }
+      }
+
+      return { names: [...names], messages };
+    }
+
+    // ── 解析按钮 ────────────────────────────────────────────────
+    parseBtn.addEventListener('click', () => {
+      const text = rawText.value.trim();
+      if (!text) return;
+
+      parsed = parseWeChatLog(text);
+
+      if (parsed.names.length === 0) {
+        showToast('未解析到任何消息，请检查格式');
+        return;
+      }
+
+      // 显示"选择自己"
+      selfName = null;
+      selfSelect.innerHTML = '';
+      parsed.names.forEach(name => {
+        const btn = document.createElement('button');
+        btn.className = 'self-btn';
+        btn.textContent = name;
+        btn.addEventListener('click', () => {
+          selfName = name;
+          selfSelect.querySelectorAll('.self-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderPreview();
+        });
+        selfSelect.appendChild(btn);
+      });
+
+      selfSection.hidden = false;
+
+      // 如果只有两个人，提示选择
+      if (parsed.names.length === 2) {
+        showToast(`检测到 ${parsed.names.length} 个参与者，点击选择哪个是你`);
+      }
+    });
+
+    // ── 预览渲染 ────────────────────────────────────────────────
+    function renderPreview() {
+      const msgs = parsed.messages;
+      let selfCount = 0, otherCount = 0;
+
+      previewList.innerHTML = msgs.map(m => {
+        if (m.type === 'time') {
+          return `<div class="time-line">${esc(m.content)}</div>`;
+        }
+        const isSelf = m.sender === selfName;
+        if (isSelf) selfCount++; else otherCount++;
+        const cls = isSelf ? 'is-self' : 'is-other';
+        const tag = isSelf
+          ? '<span class="tag self-tag">我</span>'
+          : '<span class="tag other-tag">对方</span>';
+        return `<div class="preview-msg"><span class="sender ${cls}">${esc(m.sender)}</span>${tag} ${esc(m.content)}</div>`;
+      }).join('');
+
+      importStats.textContent = `共 ${selfCount + otherCount} 条消息（我: ${selfCount}, 对方: ${otherCount}）`;
+      previewSection.hidden = false;
+      actionBar.hidden = false;
+    }
+
+    // ── 导入 ────────────────────────────────────────────────────
+    importBtn.addEventListener('click', async () => {
+      if (!selfName) {
+        showToast('请先选择哪个是你');
+        return;
+      }
+
+      const msgs = parsed.messages.filter(m => m.type === 'msg');
+      if (msgs.length === 0) return;
+
+      // 对方名字（非 self 的第一个）
+      const otherName = parsed.names.find(n => n !== selfName) || parsed.names[0];
+      const wxid = `mock_${otherName}`;
+
+      importBtn.disabled = true;
+      importBtn.textContent = '导入中...';
+
+      try {
+        const res = await fetch('/api/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wxid,
+            otherName,
+            selfName,
+            messages: msgs.map(m => ({
+              content: m.content,
+              isSelf: m.sender === selfName,
+            })),
+          }),
+        });
+
+        if (!res.ok) throw new Error('导入失败');
+        const data = await res.json();
+        showToast(`成功导入 ${data.count} 条消息`);
+
+        setTimeout(() => { location.href = '/'; }, 1200);
+      } catch (err) {
+        showToast('导入失败: ' + err.message);
+        importBtn.disabled = false;
+        importBtn.textContent = '导入';
+      }
+    });
+
+    // ── 工具 ────────────────────────────────────────────────────
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2500);
+    }
+  </script>
+
+</body>
+</html>
