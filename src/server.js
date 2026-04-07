@@ -23,9 +23,29 @@ const server = isHttps
 const wss = new WebSocketServer({ server });
 
 app.use(express.json());
+
+// ── IP 白名单 ─────────────────────────────────────────────────
+const allowedIPs = config.get().server?.allowedIPs;
+if (allowedIPs?.length) {
+  app.use((req, res, next) => {
+    const ip = req.ip.replace(/^::ffff:/, ''); // IPv4-mapped IPv6 → IPv4
+    if (allowedIPs.includes(ip)) return next();
+    res.status(403).end('Forbidden');
+  });
+}
+
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ── WebSocket ─────────────────────────────────────────────────
+
+if (allowedIPs?.length) {
+  wss.on('connection', (ws, req) => {
+    const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    if (!allowedIPs.includes(ip)) {
+      ws.close(1008, 'Forbidden');
+    }
+  });
+}
 
 function broadcast(data) {
   const json = JSON.stringify(data);
