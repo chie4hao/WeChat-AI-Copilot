@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Copilot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="app-header" id="appHeader">
+    <button class="header-back" id="headerBack" hidden>&#8592;</button>
+    <span class="header-title" id="headerTitle">AI Copilot</span>
+    <a href="/settings" class="header-settings" title="设置">&#9881;</a>
+  </header>
+
+  <div class="app-layout" id="appLayout">
+
+    <!-- 联系人列表 -->
+    <aside class="panel panel-contacts" id="panelContacts" data-panel="contacts">
+      <div class="search-wrap">
+        <input class="search-input" id="searchInput" type="search" placeholder="搜索联系人…">
+      </div>
+      <ul class="contact-list" id="contactList">
+        <li class="list-empty">暂无联系人，用 Mock 栏发一条消息试试</li>
+      </ul>
+    </aside>
+
+    <!-- 聊天记录 -->
+    <main class="panel panel-chat" id="panelChat" data-panel="chat">
+      <div class="panel-placeholder" id="chatPlaceholder">请选择一个联系人</div>
+      <div class="messages" id="messages"></div>
+    </main>
+
+    <!-- AI 助手 -->
+    <aside class="panel panel-ai" id="panelAi" data-panel="ai">
+      <div class="panel-placeholder" id="aiPlaceholder">选择联系人后查看 AI 建议</div>
+      <div class="ai-body" id="aiBody">
+        <!-- 当前轮 or 流式区域（始终在最上方） -->
+        <div class="ai-current" id="aiCurrent">
+          <div class="ai-analysis" id="aiAnalysis"></div>
+          <div class="ai-candidates" id="aiCandidates"></div>
+        </div>
+        <!-- 历史追问记录 -->
+        <div class="ai-history" id="aiHistory"></div>
+      </div>
+      <div class="ai-followup" id="aiFollowup">
+        <textarea id="followupInput" placeholder="追问 AI…" rows="2"></textarea>
+        <button id="followupBtn">发送</button>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Mock 调试栏 -->
+  <div class="mock-bar" id="mockBar">
+    <button class="mock-toggle" id="mockToggle">
+      <span id="mockToggleArrow">▲</span> Mock 调试
+    </button>
+    <div class="mock-controls" id="mockControls">
+      <label class="mock-self-label">
+        <input type="checkbox" id="mockIsSelf">
+        <span id="mockSelfLabel">对方发的</span>
+      </label>
+      <label class="mock-self-label">
+        <input type="checkbox" id="mockNoAi">
+        <span>不触发AI</span>
+      </label>
+      <input class="mock-input mock-name" id="mockName" type="text" placeholder="联系人名（选中联系人后自动填充）" value="小A">
+      <input class="mock-input mock-msg" id="mockMsg" type="text" placeholder="消息内容…">
+      <button class="mock-btn" id="mockSend">发送</button>
+      <button class="mock-btn" id="mockTrigger" title="对当前选中联系人手动触发 AI 生成">获取建议</button>
+    </div>
+  </div>
+
+  <!-- 底部导航（仅移动端） -->
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="nav-btn active" data-target="contacts">
+      <span class="nav-icon">&#128101;</span>
+      <span class="nav-label">联系人</span>
+    </button>
+    <button class="nav-btn" data-target="chat">
+      <span class="nav-icon">&#128172;</span>
+      <span class="nav-label">聊天</span>
+    </button>
+    <button class="nav-btn" data-target="ai">
+      <span class="nav-icon">&#129302;</span>
+      <span class="nav-label">AI</span>
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>

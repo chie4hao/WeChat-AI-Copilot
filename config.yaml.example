@@ -7,6 +7,9 @@ gemini:
 
 server:
   port: 3000
+  # 填写后自动启用 HTTPS（使用已有证书，无需 Nginx/Caddy）
+  # certPath: /root/cert/example.com/fullchain.pem
+  # keyPath:  /root/cert/example.com/privkey.pem
 
 # 系统 prompt：写你的人设和回复要求
 # 聊天记录由程序自动从数据库读取并拼入，不需要在这里写

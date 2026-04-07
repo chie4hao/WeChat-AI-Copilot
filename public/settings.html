@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>设置 - AI Copilot</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      overflow: auto;
+    }
+
+    .settings-page {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 16px;
+      padding-bottom: 40px;
+    }
+
+    .settings-section {
+      background: var(--bg-panel);
+      border-radius: 10px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .section-title {
+      font-size: 13px;
+      color: var(--text-sub);
+      padding: 10px 16px 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+
+    .setting-row:last-child {
+      border-bottom: none;
+    }
+
+    .setting-row.vertical {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .setting-label {
+      font-size: 14px;
+      flex-shrink: 0;
+      min-width: 80px;
+    }
+
+    .setting-input {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      background: #f9f9f9;
+    }
+
+    .setting-input:focus {
+      border-color: var(--accent);
+      background: #fff;
+    }
+
+    .setting-select {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      background: #f9f9f9;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+
+    .setting-textarea {
+      width: 100%;
+      min-height: 200px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      background: #f9f9f9;
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    .setting-textarea:focus {
+      border-color: var(--accent);
+      background: #fff;
+    }
+
+    .setting-hint {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-top: 4px;
+    }
+
+    .setting-toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    .setting-toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #ccc;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: 2px;
+      top: 2px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .setting-toggle input:checked + .toggle-slider {
+      background: var(--accent);
+    }
+
+    .setting-toggle input:checked + .toggle-slider::before {
+      transform: translateX(20px);
+    }
+
+    .save-bar {
+      padding: 16px;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      height: 38px;
+      padding: 0 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-dark);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #e8e8e8;
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: #ddd;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #333;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      opacity: 0;
+      transition: transform 0.3s, opacity 0.3s;
+      z-index: 999;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .api-key-wrap {
+      flex: 1;
+      position: relative;
+      display: flex;
+      min-width: 0;
+    }
+
+    .api-key-wrap .setting-input {
+      padding-right: 36px;
+    }
+
+    .toggle-visibility {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--text-sub);
+      padding: 2px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <a href="/" class="header-back" style="text-decoration:none">&#8592;</a>
+    <span class="header-title">设置</span>
+  </header>
+
+  <div class="settings-page">
+
+    <!-- Gemini API -->
+    <div class="section-title">Gemini API</div>
+    <div class="settings-section">
+      <div class="setting-row">
+        <span class="setting-label">API Key</span>
+        <div class="api-key-wrap">
+          <input class="setting-input" id="apiKey" type="password" placeholder="输入 Gemini API Key">
+          <button class="toggle-visibility" id="toggleKey" title="显示/隐藏">&#128065;</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">模型</span>
+        <select class="setting-select" id="model">
+          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+          <option value="gemini-2.5-flash-preview-04-17">gemini-2.5-flash-preview</option>
+          <option value="gemini-2.5-pro-preview-03-25">gemini-2.5-pro-preview</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">候选数量</span>
+        <input class="setting-input" id="candidateCount" type="number" min="1" max="10" value="3" style="width:80px;flex:none">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Temperature</span>
+        <input class="setting-input" id="temperature" type="number" min="0" max="2" step="0.1" value="0.9" style="width:80px;flex:none">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">流式输出</span>
+        <label class="setting-toggle">
+          <input type="checkbox" id="stream" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 服务器 -->
+    <div class="section-title">服务器</div>
+    <div class="settings-section">
+      <div class="setting-row">
+        <span class="setting-label">端口</span>
+        <input class="setting-input" id="port" type="number" min="1" max="65535" value="3000" style="width:100px;flex:none">
+      </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="section-title">系统 Prompt</div>
+    <div class="settings-section">
+      <div class="setting-row vertical">
+        <textarea class="setting-textarea" id="prompt" placeholder="输入系统 prompt..."></textarea>
+        <div class="setting-hint">聊天记录由程序自动拼入，不需要在这里写。此处填写你的人设和回复要求。</div>
+      </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="save-bar">
+      <button class="btn btn-secondary" id="resetBtn">重置</button>
+      <button class="btn btn-primary" id="saveBtn">保存</button>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+
+    const els = {
+      apiKey:         $('#apiKey'),
+      toggleKey:      $('#toggleKey'),
+      model:          $('#model'),
+      candidateCount: $('#candidateCount'),
+      temperature:    $('#temperature'),
+      stream:         $('#stream'),
+      port:           $('#port'),
+      prompt:         $('#prompt'),
+      saveBtn:        $('#saveBtn'),
+      resetBtn:       $('#resetBtn'),
+      toast:          $('#toast'),
+    };
+
+    let originalConfig = null;
+
+    // ── Load ──────────────────────────────────────────────────────
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/settings');
+        const cfg = await res.json();
+        originalConfig = cfg;
+        fillForm(cfg);
+      } catch (err) {
+        showToast('加载设置失败: ' + err.message);
+      }
+    }
+
+    function fillForm(cfg) {
+      els.apiKey.value         = cfg.gemini?.api_key || '';
+      els.candidateCount.value = cfg.gemini?.candidate_count ?? 3;
+      els.temperature.value    = cfg.gemini?.temperature ?? 0.9;
+      els.stream.checked       = cfg.gemini?.stream !== false;
+      els.port.value           = cfg.server?.port ?? 3000;
+      els.prompt.value         = cfg.prompt || '';
+
+      // 模型：如果值不在选项里，动态添加
+      const modelVal = cfg.gemini?.model || 'gemini-2.0-flash';
+      if (!els.model.querySelector(`option[value="${modelVal}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = modelVal;
+        opt.textContent = modelVal;
+        els.model.appendChild(opt);
+      }
+      els.model.value = modelVal;
+    }
+
+    // ── Save ──────────────────────────────────────────────────────
+    async function saveSettings() {
+      const cfg = {
+        gemini: {
+          api_key:         els.apiKey.value.trim(),
+          model:           els.model.value,
+          candidate_count: parseInt(els.candidateCount.value) || 3,
+          temperature:     parseFloat(els.temperature.value) || 0.9,
+          stream:          els.stream.checked,
+        },
+        server: {
+          port: parseInt(els.port.value) || 3000,
+        },
+        prompt: els.prompt.value,
+      };
+
+      els.saveBtn.disabled = true;
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cfg),
+        });
+        if (!res.ok) throw new Error('保存失败');
+        originalConfig = cfg;
+        showToast('已保存');
+      } catch (err) {
+        showToast('保存失败: ' + err.message);
+      } finally {
+        els.saveBtn.disabled = false;
+      }
+    }
+
+    // ── Reset ─────────────────────────────────────────────────────
+    function resetForm() {
+      if (originalConfig) {
+        fillForm(originalConfig);
+        showToast('已重置');
+      }
+    }
+
+    // ── Toast ─────────────────────────────────────────────────────
+    let toastTimer = null;
+    function showToast(msg) {
+      els.toast.textContent = msg;
+      els.toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2000);
+    }
+
+    // ── Events ────────────────────────────────────────────────────
+    els.saveBtn.addEventListener('click', saveSettings);
+    els.resetBtn.addEventListener('click', resetForm);
+
+    els.toggleKey.addEventListener('click', () => {
+      const isPassword = els.apiKey.type === 'password';
+      els.apiKey.type = isPassword ? 'text' : 'password';
+    });
+
+    // ── Init ──────────────────────────────────────────────────────
+    loadSettings();
+  </script>
+
+</body>
+</html>
