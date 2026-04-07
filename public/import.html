@@ -231,12 +231,42 @@
     let parsed = { names: [], messages: [] }; // { names: string[], messages: [{sender, content}] }
     let selfName = null;
 
-    // 从 URL 参数获取分享文本
+    // 从 URL 参数获取分享文本（旧路径）
     const urlText = new URLSearchParams(location.search).get('text');
     if (urlText) {
       rawText.value = urlText;
-      // 自动解析
       setTimeout(() => parseBtn.click(), 100);
+    }
+
+    // 从 IndexedDB 读取 SW 存的分享数据（Share Target 文件/文本路径）
+    if (new URLSearchParams(location.search).get('from') === 'share') {
+      (async () => {
+        try {
+          const db = await new Promise((res, rej) => {
+            const req = indexedDB.open('ai-copilot', 1);
+            req.onupgradeneeded = (e) => e.target.result.createObjectStore('share', { keyPath: 'id', autoIncrement: true });
+            req.onsuccess = (e) => res(e.target.result);
+            req.onerror = (e) => rej(e.target.error);
+          });
+          const all = await new Promise((res, rej) => {
+            const tx = db.transaction('share', 'readwrite');
+            const store = tx.objectStore('share');
+            const items = [];
+            store.openCursor().onsuccess = (e) => {
+              const cursor = e.target.result;
+              if (cursor) { items.push(cursor.value); cursor.delete(); cursor.continue(); }
+              else res(items);
+            };
+            tx.onerror = (e) => rej(e.target.error);
+          });
+          if (all.length > 0) {
+            rawText.value = all[all.length - 1].text;
+            setTimeout(() => parseBtn.click(), 100);
+          }
+        } catch (err) {
+          console.error('读取分享数据失败', err);
+        }
+      })();
     }
 
     // ── 解析微信聊天记录 ────────────────────────────────────────

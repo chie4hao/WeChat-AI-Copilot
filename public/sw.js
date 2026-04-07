@@ -1,19 +1,59 @@
-// Service worker — PWA installability + Share Target support
+// Service Worker — PWA installability + Share Target support
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', () => self.clients.claim());
 
+// ── IndexedDB helpers ─────────────────────────────────────────
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('ai-copilot', 1);
+    req.onupgradeneeded = (e) => {
+      e.target.result.createObjectStore('share', { keyPath: 'id', autoIncrement: true });
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function saveSharedText(text) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('share', 'readwrite');
+    tx.objectStore('share').add({ text, ts: Date.now() });
+    tx.oncomplete = resolve;
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+// ── Fetch handler ─────────────────────────────────────────────
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // 拦截 Share Target POST，提取文本后重定向到导入页
+  // 拦截 Share Target POST
   if (url.pathname === '/import' && e.request.method === 'POST') {
-    e.respondWith(
-      e.request.formData().then((formData) => {
-        const text = formData.get('text') || formData.get('title') || '';
-        return Response.redirect(`/import.html?text=${encodeURIComponent(text)}`, 303);
-      })
-    );
+    e.respondWith((async () => {
+      try {
+        const formData = await e.request.formData();
+
+        let text = formData.get('text') || formData.get('title') || '';
+
+        // 微信可能以文件形式分享，尝试读取文件内容
+        const files = formData.getAll('files');
+        if (!text && files.length > 0) {
+          text = await files[0].text();
+        }
+
+        if (text) {
+          await saveSharedText(text);
+          return Response.redirect('/import.html?from=share', 303);
+        }
+        return Response.redirect('/import.html', 303);
+      } catch (err) {
+        return Response.redirect('/import.html', 303);
+      }
+    })());
     return;
   }
 
