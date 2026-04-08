@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import config from './config.js';
+import * as db from './db.js';
 
 /**
  * 每个联系人维护独立的状态：
@@ -99,22 +100,65 @@ async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete
 }
 
 /**
+ * 从数据库恢复 chat session（服务重启后追问时调用）
+ */
+function restoreSession(contactId) {
+  const fullSession = db.getFullAiSession(contactId);
+  if (!fullSession?.messages?.length) return null;
+
+  const { model, temperature, systemInstruction } = getGeminiConfig();
+
+  // 重建 Gemini chat history：ai_round → model turn，user → user turn
+  // 第一轮 user 消息用当前聊天记录重建
+  const { candidate_count } = getGeminiConfig();
+  const chatHistory = db.getRecentMessages(contactId);
+  const firstUserMsg = buildUserMessage(chatHistory, candidate_count, '');
+
+  const history = [{ role: 'user', parts: [{ text: firstUserMsg }] }];
+
+  for (const msg of fullSession.messages) {
+    if (msg.type === 'ai_round') {
+      const raw = JSON.stringify({ message: msg.content.analysis || '', candidates: msg.content.candidates || [] });
+      history.push({ role: 'model', parts: [{ text: raw }] });
+    } else if (msg.type === 'user') {
+      history.push({ role: 'user', parts: [{ text: msg.content }] });
+    }
+  }
+
+  // 最后一条必须是 model，才能继续追问；否则 history 不完整不恢复
+  if (history[history.length - 1].role !== 'model') return null;
+
+  const chat = getClient().chats.create({
+    model,
+    config: { temperature, systemInstruction, responseMimeType: 'application/json',
+      responseSchema: { type: 'object', properties: {
+        message: { type: 'string' }, candidates: { type: 'array', items: { type: 'string' } },
+      }, required: ['message', 'candidates'] },
+    },
+    history,
+  });
+
+  sessions.set(contactId, { chat, abortController: new AbortController() });
+  return sessions.get(contactId);
+}
+
+/**
  * 流式追问（用户输入追问文本时调用）
- *
- * @param {number}   contactId
- * @param {string}   userText    用户追问内容
- * @param {object}   callbacks
  */
 async function followUp(contactId, userText, { onChunk, onComplete, onError } = {}) {
-  const session = sessions.get(contactId);
+  let session = sessions.get(contactId);
+
+  // 服务重启后内存里没有 session，尝试从 db 恢复
+  if (!session) {
+    session = restoreSession(contactId);
+  }
+
   if (!session) {
     onError?.(new Error('没有活跃的 AI session，请先触发一次生成'));
     return;
   }
 
-  // 取消当前请求，但保留 chat（保持追问上下文）
   cancelRequest(contactId);
-
   await _sendMessage(session, userText, { onChunk, onComplete, onError });
 }
 

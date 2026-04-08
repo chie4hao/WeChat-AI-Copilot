@@ -49,8 +49,6 @@ if (allowedIPs?.length) {
 
 function broadcast(data) {
   const json = JSON.stringify(data);
-  const count = [...wss.clients].filter(c => c.readyState === 1).length;
-  console.log(`[broadcast] type=${data.type} clients=${count}`);
   for (const client of wss.clients) {
     if (client.readyState === 1 /* OPEN */) client.send(json);
   }
@@ -77,7 +75,7 @@ app.get('/api/contacts', (_req, res) => {
 
 app.get('/api/contacts/:id/messages', (req, res) => {
   const contactId = Number(req.params.id);
-  const limit = Number(req.query.limit) || 30;
+  const limit = Number(req.query.limit) || 200;
   res.json(db.getRecentMessages(contactId, limit));
 });
 
@@ -255,9 +253,7 @@ wechat.on('message', (msg) => {
 });
 
 async function triggerAi(contact) {
-  console.log(`[triggerAi] contactId=${contact.id} name=${contact.name}`);
   const chatHistory = db.getRecentMessages(contact.id);
-  console.log(`[triggerAi] chatHistory length=${chatHistory.length}`);
   const session = db.resetAiSession(contact.id);
 
   broadcast({ type: 'ai_start', contactId: contact.id });
@@ -266,7 +262,6 @@ async function triggerAi(contact) {
     await ai.generateSuggestions(contact.id, chatHistory, {
       onChunk:    (chunk) => broadcast({ type: 'ai_chunk', contactId: contact.id, chunk }),
       onComplete: (result) => {
-        console.log(`[triggerAi] complete, candidates=${result.candidates?.length}`);
         db.insertAiRound({ sessionId: session.id, analysis: result.message, candidates: result.candidates });
         db.setPendingSuggestion(contact.id, true);
         broadcast({ type: 'ai_complete', contactId: contact.id, result });

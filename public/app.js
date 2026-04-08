@@ -316,18 +316,13 @@ let wsReconnectTimer;
 
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  console.log('[ws] 尝试连接:', `${proto}://${location.host}`);
   ws = new WebSocket(`${proto}://${location.host}`);
 
-  ws.addEventListener('open', () => console.log('[ws] 已连接'));
-  ws.addEventListener('error', e => console.error('[ws] 连接错误', e));
   ws.addEventListener('message', e => {
     const evt = JSON.parse(e.data);
-    console.log('[ws] 收到事件:', evt.type, evt);
     handleWsEvent(evt);
   });
   ws.addEventListener('close', () => {
-    console.warn('[ws] 连接断开，3s 后重试');
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = setTimeout(connectWs, 3000);
   });
@@ -342,18 +337,15 @@ function handleWsEvent(evt) {
       loadContacts();
       break;
     case 'ai_start':
-      console.log(`[ai_start] evt.contactId=${evt.contactId}(${typeof evt.contactId}) currentContactId=${currentContactId}(${typeof currentContactId}) match=${evt.contactId === currentContactId}`);
       if (evt.contactId === currentContactId) onAiStart();
       break;
     case 'ai_chunk':
       if (evt.contactId === currentContactId) onAiChunk(evt.chunk);
       break;
     case 'ai_complete':
-      console.log('[ai_complete] result:', evt.result);
       if (evt.contactId === currentContactId) onAiComplete(evt.result);
       break;
     case 'ai_error':
-      console.error('[ai_error]', evt.error);
       if (evt.contactId === currentContactId) onAiError(evt.error);
       break;
   }
@@ -527,9 +519,7 @@ mockTrigger.addEventListener('click', async () => {
     alert('请先选择一个联系人');
     return;
   }
-  console.log('[mock] trigger AI, contactId=', currentContactId, typeof currentContactId);
-  const res = await api('POST', '/api/mock/trigger', { contactId: currentContactId });
-  console.log('[mock] trigger 响应:', res);
+  await api('POST', '/api/mock/trigger', { contactId: currentContactId });
 });
 
 /* ── Init ────────────────────────────────────────────────────── */

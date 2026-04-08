@@ -115,7 +115,7 @@ function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' })
   return result.lastInsertRowid;
 }
 
-function getRecentMessages(contactId, limit = 30) {
+function getRecentMessages(contactId, limit = 200) {
   return getDb().prepare(`
     SELECT * FROM messages
     WHERE contact_id = ?
