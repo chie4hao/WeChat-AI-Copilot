@@ -140,6 +140,10 @@ async function _sendMessage(session, message, { onChunk, onComplete, onError } =
 
 async function _streamingRequest(session, message, { onChunk, onComplete }) {
   let buffer = '';
+  // 流式 JSON 解析状态：只提取 message 字段的值发给前端
+  let msgStarted = false;
+  let msgDone = false;
+  let pending = '';
 
   const stream = await session.chat.sendMessageStream(
     { message },
@@ -148,10 +152,38 @@ async function _streamingRequest(session, message, { onChunk, onComplete }) {
 
   for await (const chunk of stream) {
     const text = chunk.text ?? '';
-    if (text) {
-      buffer += text;
-      onChunk?.(text);
+    if (!text) continue;
+    buffer += text;
+
+    if (msgDone || !onChunk) continue;
+
+    pending += text;
+
+    if (!msgStarted) {
+      const match = pending.match(/"message"\s*:\s*"/);
+      if (!match) continue;
+      msgStarted = true;
+      pending = pending.slice(match.index + match[0].length);
     }
+
+    // 扫描 pending，输出直到遇到未转义的结束引号
+    let out = '';
+    let i = 0;
+    while (i < pending.length) {
+      if (pending[i] === '\\' && i + 1 < pending.length) {
+        const esc = pending[i + 1];
+        out += esc === 'n' ? '\n' : esc === 't' ? '\t' : esc;
+        i += 2;
+      } else if (pending[i] === '"') {
+        msgDone = true;
+        i++;
+        break;
+      } else {
+        out += pending[i++];
+      }
+    }
+    pending = pending.slice(i);
+    if (out) onChunk(out);
   }
 
   onComplete?.(JSON.parse(buffer));
