@@ -306,6 +306,18 @@
         <span class="setting-label">端口</span>
         <input class="setting-input" id="port" type="number" min="1" max="65535" value="3000" style="width:100px;flex:none">
       </div>
+      <div class="setting-row">
+        <span class="setting-label">证书路径</span>
+        <input class="setting-input" id="certPath" type="text" placeholder="留空则使用 HTTP，例：/root/cert/fullchain.pem">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">私钥路径</span>
+        <input class="setting-input" id="keyPath" type="text" placeholder="例：/root/cert/privkey.pem">
+      </div>
+      <div class="setting-row vertical">
+        <span class="section-label" style="padding:0 0 4px">IP 白名单（每行一个，留空不限制）</span>
+        <textarea class="setting-textarea" id="allowedIPs" style="min-height:80px" placeholder="127.0.0.1&#10;1.2.3.4"></textarea>
+      </div>
     </div>
 
     <!-- Prompt -->
@@ -339,6 +351,9 @@
       temperature:    $('#temperature'),
       stream:         $('#stream'),
       port:           $('#port'),
+      certPath:       $('#certPath'),
+      keyPath:        $('#keyPath'),
+      allowedIPs:     $('#allowedIPs'),
       prompt:         $('#prompt'),
       saveBtn:        $('#saveBtn'),
       resetBtn:       $('#resetBtn'),
@@ -366,6 +381,9 @@
       els.temperature.value    = cfg.gemini?.temperature ?? 0.9;
       els.stream.checked       = cfg.gemini?.stream !== false;
       els.port.value           = cfg.server?.port ?? 3000;
+      els.certPath.value       = cfg.server?.certPath || '';
+      els.keyPath.value        = cfg.server?.keyPath || '';
+      els.allowedIPs.value     = (cfg.server?.allowedIPs || []).join('\n');
       els.prompt.value         = cfg.prompt || '';
 
       // 模型：如果值不在选项里，动态添加
@@ -392,6 +410,11 @@
         },
         server: {
           port: parseInt(els.port.value) || 3000,
+          ...(els.certPath.value.trim() && { certPath: els.certPath.value.trim() }),
+          ...(els.keyPath.value.trim()  && { keyPath:  els.keyPath.value.trim()  }),
+          ...(els.allowedIPs.value.trim() && {
+            allowedIPs: els.allowedIPs.value.split('\n').map(s => s.trim()).filter(Boolean),
+          }),
         },
         prompt: els.prompt.value,
       };

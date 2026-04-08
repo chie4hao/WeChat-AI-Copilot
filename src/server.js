@@ -210,7 +210,13 @@ app.get('/api/settings', (_req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
-  config.save(req.body);
+  // 保留前端不管的服务器字段，防止覆盖时丢失
+  const current = config.get();
+  const incoming = req.body;
+  if (current.server) {
+    incoming.server = Object.assign({}, current.server, incoming.server);
+  }
+  config.save(incoming);
   res.json({ ok: true });
 });
 
