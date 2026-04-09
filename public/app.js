@@ -245,13 +245,16 @@ function scrollToBottom(el) {
 
 /* ── AI session rendering ────────────────────────────────────── */
 async function loadAiSession(contactId) {
+  hideAiLoading(); // 清掉上一个联系人可能遗留的 loading
   const data = await api('GET', `/api/contacts/${contactId}/ai-session`);
   hasAiSession = !!data;
   renderAiSession(data);
   aiPlaceholder.style.display = 'none';
   aiBody.style.display = 'flex';
   aiFollowup.style.display = 'flex';
-  setFollowupEnabled(hasAiSession);
+  setFollowupEnabled(hasAiSession && !isStreaming);
+  // 如果切换过来时该联系人仍在生成，补显 loading
+  if (aiGeneratingIds.has(contactId)) showAiLoading();
 }
 
 /**
@@ -394,10 +397,12 @@ function handleWsEvent(evt) {
     case 'ai_complete':
       setContactGenerating(evt.contactId, false);
       if (evt.contactId === currentContactId) onAiComplete(evt.result);
+      else hideAiLoading();
       break;
     case 'ai_error':
       setContactGenerating(evt.contactId, false);
       if (evt.contactId === currentContactId) onAiError(evt.error);
+      else hideAiLoading();
       break;
   }
 }
