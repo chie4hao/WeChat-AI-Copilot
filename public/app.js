@@ -619,8 +619,8 @@ function showMsgCtxMenu(e, el) {
 
 function hideMsgCtxMenu() { msgCtxMenu.hidden = true; ctxMsgId = null; ctxMsgEl = null; }
 
-document.addEventListener('click', hideMsgCtxMenu);
-document.addEventListener('touchstart', hideMsgCtxMenu, { passive: true });
+document.addEventListener('click', e => { if (!msgCtxMenu.contains(e.target)) hideMsgCtxMenu(); });
+document.addEventListener('touchstart', e => { if (!msgCtxMenu.contains(e.target)) hideMsgCtxMenu(); }, { passive: true });
 
 $('msgCtxDelete').addEventListener('click', async () => {
   if (!ctxMsgId) return;
@@ -697,8 +697,8 @@ function showCtxMenu(e, contactId) {
 
 function hideCtxMenu() { ctxMenu.hidden = true; ctxContactId = null; }
 
-document.addEventListener('click', hideCtxMenu);
-document.addEventListener('touchstart', hideCtxMenu, { passive: true });
+document.addEventListener('click', e => { if (!ctxMenu.contains(e.target)) hideCtxMenu(); });
+document.addEventListener('touchstart', e => { if (!ctxMenu.contains(e.target)) hideCtxMenu(); }, { passive: true });
 
 $('ctxNotes').addEventListener('click', () => {
   const c = contacts.find(x => x.id === ctxContactId);
