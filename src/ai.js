@@ -27,8 +27,18 @@ function getGeminiConfig() {
  * @param {number} candidateCount   候选数量
  * @param {string} notes            联系人备注（可选）
  */
+function formatMsgTime(ts) {
+  const d = new Date(ts);
+  const mo = d.getMonth() + 1;
+  const day = d.getDate();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${mo}月${day}日 ${hh}:${mm}`;
+}
+
 function buildUserMessage(chatHistory, candidateCount, notes) {
-  const lines = chatHistory.map(m => `${m.is_self ? '我' : '她'}: ${m.content}`);
+  const lines = chatHistory.map(m =>
+    `[${formatMsgTime(m.timestamp)}] ${m.is_self ? '我' : '她'}: ${m.content}`);
   const parts = [];
 
   if (notes) {

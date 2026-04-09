@@ -196,8 +196,10 @@ app.post('/api/import', (req, res) => {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (!m.content) continue;
-    // 时间戳按顺序递增，确保消息排序正确
-    const timestamp = now - (messages.length - i) * 1000;
+    // 优先用解析出的真实时间戳；加 i*100ms 偏移确保同分钟消息顺序正确
+    // 没有时间戳时退回到按导入顺序递增的虚拟时间戳
+    const base = (typeof m.timestamp === 'number') ? m.timestamp : (now - (messages.length - i) * 1000);
+    const timestamp = base + i * 100;
     db.insertMessage({
       contactId: contact.id,
       content: m.content,
