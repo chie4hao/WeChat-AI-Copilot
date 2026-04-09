@@ -121,6 +121,44 @@ app.post('/api/contacts/:id/read', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── API: Contact management ───────────────────────────────────
+
+// 新建联系人
+app.post('/api/contacts', (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+  const wxid = `manual_${Date.now()}`;
+  const contact = db.upsertContact({ wxid, name: name.trim(), avatar: null });
+  broadcast({ type: 'contacts_update' });
+  res.json(contact);
+});
+
+// 修改联系人名称
+app.post('/api/contacts/:id/rename', (req, res) => {
+  const contactId = Number(req.params.id);
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+  db.updateContactName(contactId, name.trim());
+  broadcast({ type: 'contacts_update' });
+  res.json({ ok: true });
+});
+
+// 清空聊天记录（保留联系人）
+app.post('/api/contacts/:id/clear-messages', (req, res) => {
+  const contactId = Number(req.params.id);
+  db.clearMessages(contactId);
+  broadcast({ type: 'contacts_update' });
+  res.json({ ok: true });
+});
+
+// 删除联系人（级联删除消息和 AI session）
+app.delete('/api/contacts/:id', (req, res) => {
+  const contactId = Number(req.params.id);
+  db.deleteContact(contactId);
+  broadcast({ type: 'contacts_update' });
+  res.json({ ok: true });
+});
+
 // ── API: Contact Notes ────────────────────────────────────────
 
 app.post('/api/contacts/:id/notes', (req, res) => {

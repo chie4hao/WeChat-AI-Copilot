@@ -28,9 +28,10 @@
     <aside class="panel panel-contacts" id="panelContacts" data-panel="contacts">
       <div class="search-wrap">
         <input class="search-input" id="searchInput" type="search" placeholder="搜索联系人…">
+        <button class="add-contact-btn" id="addContactBtn" title="新建联系人">＋</button>
       </div>
       <ul class="contact-list" id="contactList">
-        <li class="list-empty">暂无联系人，用 Mock 栏发一条消息试试</li>
+        <li class="list-empty">暂无联系人</li>
       </ul>
     </aside>
 
@@ -96,6 +97,37 @@
       <span class="nav-label">AI</span>
     </button>
   </nav>
+
+  <!-- 右键/长按上下文菜单 -->
+  <div class="ctx-menu" id="ctxMenu" hidden>
+    <button class="ctx-item" id="ctxRename">&#9998; 修改名称</button>
+    <button class="ctx-item" id="ctxClear">&#128465; 清空聊天记录</button>
+    <button class="ctx-item ctx-danger" id="ctxDelete">&#10006; 删除联系人</button>
+  </div>
+
+  <!-- 通用输入弹窗 -->
+  <div class="modal-mask" id="modalMask" hidden>
+    <div class="modal" id="modal">
+      <div class="modal-title" id="modalTitle">新建联系人</div>
+      <input class="modal-input" id="modalInput" type="text" placeholder="">
+      <div class="modal-actions">
+        <button class="modal-btn modal-cancel" id="modalCancel">取消</button>
+        <button class="modal-btn modal-confirm" id="modalConfirm">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 确认弹窗 -->
+  <div class="modal-mask" id="confirmMask" hidden>
+    <div class="modal" id="confirmModal">
+      <div class="modal-title" id="confirmTitle">确认删除</div>
+      <div class="modal-body" id="confirmBody"></div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-cancel" id="confirmCancel">取消</button>
+        <button class="modal-btn modal-danger" id="confirmOk">删除</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

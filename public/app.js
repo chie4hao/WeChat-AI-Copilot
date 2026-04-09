@@ -32,6 +32,23 @@ const mockIsSelf    = $('mockIsSelf');
 const mockSend      = $('mockSend');
 const mockTrigger   = $('mockTrigger');
 
+// 联系人管理
+const addContactBtn = $('addContactBtn');
+const ctxMenu       = $('ctxMenu');
+const ctxRename     = $('ctxRename');
+const ctxClear      = $('ctxClear');
+const ctxDelete     = $('ctxDelete');
+const modalMask     = $('modalMask');
+const modalTitle    = $('modalTitle');
+const modalInput    = $('modalInput');
+const modalCancel   = $('modalCancel');
+const modalConfirm  = $('modalConfirm');
+const confirmMask   = $('confirmMask');
+const confirmTitle  = $('confirmTitle');
+const confirmBody   = $('confirmBody');
+const confirmCancel = $('confirmCancel');
+const confirmOk     = $('confirmOk');
+
 /* ── Helpers ─────────────────────────────────────────────────── */
 function formatTime(ms) {
   const d = new Date(ms);
@@ -132,6 +149,8 @@ function renderContactList(list) {
 
   contactList.querySelectorAll('.contact-item').forEach(el => {
     el.addEventListener('click', () => selectContact(Number(el.dataset.id)));
+    el.addEventListener('contextmenu', e => { e.preventDefault(); showCtxMenu(e, Number(el.dataset.id)); });
+    addLongPressListener(el, (e) => showCtxMenu(e, Number(el.dataset.id)));
   });
 }
 
@@ -521,6 +540,147 @@ mockTrigger.addEventListener('click', async () => {
   }
   await api('POST', '/api/mock/trigger', { contactId: currentContactId });
 });
+
+/* ── Contact management ──────────────────────────────────────── */
+
+// 长按检测（500ms）
+function addLongPressListener(el, callback) {
+  let timer = null;
+  let moved = false;
+  el.addEventListener('touchstart', e => {
+    moved = false;
+    timer = setTimeout(() => { if (!moved) callback(e.touches[0]); }, 500);
+  }, { passive: true });
+  el.addEventListener('touchmove', () => { moved = true; clearTimeout(timer); }, { passive: true });
+  el.addEventListener('touchend', () => clearTimeout(timer), { passive: true });
+}
+
+// 当前右键目标 contactId
+let ctxContactId = null;
+
+function showCtxMenu(e, contactId) {
+  ctxContactId = contactId;
+  const x = e.clientX ?? e.pageX;
+  const y = e.clientY ?? e.pageY;
+  ctxMenu.hidden = false;
+  // 防止菜单超出屏幕
+  const mw = ctxMenu.offsetWidth || 160;
+  const mh = ctxMenu.offsetHeight || 120;
+  ctxMenu.style.left = Math.min(x, window.innerWidth - mw - 8) + 'px';
+  ctxMenu.style.top  = Math.min(y, window.innerHeight - mh - 8) + 'px';
+}
+
+function hideCtxMenu() { ctxMenu.hidden = true; ctxContactId = null; }
+
+document.addEventListener('click', hideCtxMenu);
+document.addEventListener('touchstart', hideCtxMenu, { passive: true });
+
+ctxRename.addEventListener('click', () => {
+  const c = contacts.find(x => x.id === ctxContactId);
+  if (!c) return;
+  showInputModal('修改名称', c.name, '联系人名称', async (name) => {
+    await api('POST', `/api/contacts/${c.id}/rename`, { name });
+    await loadContacts();
+  });
+});
+
+ctxClear.addEventListener('click', () => {
+  const c = contacts.find(x => x.id === ctxContactId);
+  if (!c) return;
+  showConfirmModal(
+    '清空聊天记录',
+    `确定清空「${c.name}」的所有聊天记录？此操作不可恢复。`,
+    async () => {
+      await api('POST', `/api/contacts/${c.id}/clear-messages`);
+      if (currentContactId === c.id) {
+        messages.innerHTML = '';
+        scrollToBottom(messages);
+      }
+      await loadContacts();
+    }
+  );
+});
+
+ctxDelete.addEventListener('click', () => {
+  const c = contacts.find(x => x.id === ctxContactId);
+  if (!c) return;
+  showConfirmModal(
+    '删除联系人',
+    `确定删除「${c.name}」？聊天记录和 AI 建议将一并删除，不可恢复。`,
+    async () => {
+      await api('DELETE', `/api/contacts/${c.id}`);
+      if (currentContactId === c.id) {
+        currentContactId = null;
+        messages.innerHTML = '';
+        chatPlaceholder.style.display = '';
+        aiPlaceholder.style.display = '';
+        aiBody.style.display = 'none';
+        aiFollowup.style.display = 'none';
+        hasAiSession = false;
+      }
+      await loadContacts();
+    }
+  );
+});
+
+// 新建联系人
+addContactBtn.addEventListener('click', () => {
+  showInputModal('新建联系人', '', '输入联系人名称', async (name) => {
+    await api('POST', '/api/contacts', { name });
+    await loadContacts();
+  });
+});
+
+// 通用输入弹窗
+function showInputModal(title, defaultValue, placeholder, onConfirm) {
+  modalTitle.textContent = title;
+  modalInput.value = defaultValue;
+  modalInput.placeholder = placeholder;
+  modalMask.hidden = false;
+  setTimeout(() => { modalInput.focus(); modalInput.select(); }, 50);
+
+  const doConfirm = async () => {
+    const val = modalInput.value.trim();
+    if (!val) return;
+    modalMask.hidden = true;
+    cleanup();
+    await onConfirm(val);
+  };
+
+  const doCancel = () => { modalMask.hidden = true; cleanup(); };
+
+  const onKey = (e) => { if (e.key === 'Enter') doConfirm(); if (e.key === 'Escape') doCancel(); };
+
+  modalConfirm.addEventListener('click', doConfirm);
+  modalCancel.addEventListener('click', doCancel);
+  modalInput.addEventListener('keydown', onKey);
+  modalMask.addEventListener('click', e => { if (e.target === modalMask) doCancel(); });
+
+  function cleanup() {
+    modalConfirm.removeEventListener('click', doConfirm);
+    modalCancel.removeEventListener('click', doCancel);
+    modalInput.removeEventListener('keydown', onKey);
+  }
+}
+
+// 通用确认弹窗
+function showConfirmModal(title, body, onConfirm) {
+  confirmTitle.textContent = title;
+  confirmBody.textContent = body;
+  confirmMask.hidden = false;
+
+  const doConfirm = async () => { confirmMask.hidden = true; cleanup(); await onConfirm(); };
+  const doCancel  = () => { confirmMask.hidden = true; cleanup(); };
+
+  confirmOk.addEventListener('click', doConfirm);
+  confirmCancel.addEventListener('click', doCancel);
+  confirmMask.addEventListener('click', e => { if (e.target === confirmMask) doCancel(); });
+
+  function cleanup() {
+    confirmOk.removeEventListener('click', doConfirm);
+    confirmCancel.removeEventListener('click', doCancel);
+  }
+}
 
 /* ── Init ────────────────────────────────────────────────────── */
 async function init() {

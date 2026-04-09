@@ -99,6 +99,33 @@ function setPendingSuggestion(contactId, value) {
     .run(value ? 1 : 0, contactId);
 }
 
+function updateContactName(contactId, name) {
+  getDb()
+    .prepare('UPDATE contacts SET name = ? WHERE id = ?')
+    .run(name, contactId);
+}
+
+function clearMessages(contactId) {
+  getDb()
+    .prepare('DELETE FROM messages WHERE contact_id = ?')
+    .run(contactId);
+  getDb()
+    .prepare('UPDATE contacts SET last_message = NULL, last_time = ? WHERE id = ?')
+    .run(Date.now(), contactId);
+}
+
+function deleteContact(contactId) {
+  const db = getDb();
+  // 级联删除：ai_messages → ai_sessions → messages → contact
+  const session = db.prepare('SELECT id FROM ai_sessions WHERE contact_id = ?').get(contactId);
+  if (session) {
+    db.prepare('DELETE FROM ai_messages WHERE session_id = ?').run(session.id);
+    db.prepare('DELETE FROM ai_sessions WHERE id = ?').run(session.id);
+  }
+  db.prepare('DELETE FROM messages WHERE contact_id = ?').run(contactId);
+  db.prepare('DELETE FROM contacts WHERE id = ?').run(contactId);
+}
+
 // ── Messages ──────────────────────────────────────────────────
 
 function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' }) {
@@ -189,7 +216,10 @@ export {
   getContacts,
   getContactByWxid,
   updateContactNotes,
+  updateContactName,
   setPendingSuggestion,
+  clearMessages,
+  deleteContact,
   insertMessage,
   getRecentMessages,
   resetAiSession,
