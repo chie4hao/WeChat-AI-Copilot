@@ -230,7 +230,11 @@ async function _streamingRequest(session, message, { onChunk, onComplete }) {
     if (out) onChunk(out);
   }
 
-  onComplete?.(JSON.parse(buffer));
+  try {
+    onComplete?.(JSON.parse(buffer));
+  } catch (e) {
+    throw new Error(`AI 返回了无效的 JSON：${e.message}`);
+  }
 }
 
 async function _blockingRequest(session, message, { onComplete }) {

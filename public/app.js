@@ -179,15 +179,16 @@ searchInput.addEventListener('input', () => {
 });
 
 /* ── Select a contact ────────────────────────────────────────── */
-async function selectContact(id) {
-  currentContactId = id;
-  renderContactList(contacts); // update active highlight
+let _selectSeq = 0; // 防止快速切换时旧请求覆盖新内容
 
-  // Auto-fill mock name with current contact
+async function selectContact(id) {
+  const seq = ++_selectSeq;
+  currentContactId = id;
+  renderContactList(contacts);
+
   const contact = contacts.find(c => c.id === id);
   if (contact) mockName.value = contact.name;
 
-  // 清除红点
   if (contact?.has_pending_suggestion) {
     contact.has_pending_suggestion = 0;
     renderContactList(contacts);
@@ -196,12 +197,17 @@ async function selectContact(id) {
 
   await Promise.all([loadMessages(id), loadAiSession(id)]);
 
+  // 如果在等待期间用户又切换了联系人，丢弃这次结果
+  if (seq !== _selectSeq) return;
+
   if (!isDesktop()) showPanel('chat');
 }
 
 /* ── Chat messages ───────────────────────────────────────────── */
 async function loadMessages(contactId) {
+  const seq = _selectSeq;
   const data = await api('GET', `/api/contacts/${contactId}/messages`);
+  if (seq !== _selectSeq) return; // 已切换到其他联系人
   renderMessages(data);
   chatPlaceholder.style.display = 'none';
   messages.style.display = 'flex';
@@ -246,7 +252,9 @@ function scrollToBottom(el) {
 /* ── AI session rendering ────────────────────────────────────── */
 async function loadAiSession(contactId) {
   hideAiLoading(); // 清掉上一个联系人可能遗留的 loading
+  const seq = _selectSeq;
   const data = await api('GET', `/api/contacts/${contactId}/ai-session`);
+  if (seq !== _selectSeq) return; // 已切换到其他联系人
   hasAiSession = !!data;
   renderAiSession(data);
   aiPlaceholder.style.display = 'none';
@@ -389,7 +397,7 @@ function handleWsEvent(evt) {
       break;
     case 'ai_start':
       setContactGenerating(evt.contactId, true);
-      if (evt.contactId === currentContactId) onAiStart();
+      if (evt.contactId === currentContactId) onAiStart(evt.fresh);
       break;
     case 'ai_chunk':
       if (evt.contactId === currentContactId) onAiChunk(evt.chunk);
@@ -429,15 +437,20 @@ function hideAiLoading() {
   if (_aiLoadingEl) { _aiLoadingEl.remove(); _aiLoadingEl = null; }
 }
 
-function onAiStart() {
+function onAiStart(fresh = false) {
   isStreaming = true;
   hasAiSession = true;
   followupBtn.disabled = true;
 
-  // Reset the current area for the new generation
   aiAnalysis.textContent = '';
   aiAnalysis.classList.add('streaming');
   aiCandidates.innerHTML = '';
+
+  // 新消息触发（fresh）：完全重置面板，清掉旧追问记录
+  if (fresh) {
+    aiHistory.innerHTML = '';
+    candidateOffset = 0;
+  }
 
   aiPlaceholder.style.display = 'none';
   aiBody.style.display = 'flex';

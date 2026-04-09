@@ -307,7 +307,7 @@ async function triggerAi(contact) {
   const chatHistory = db.getRecentMessages(contact.id);
   const session = db.resetAiSession(contact.id);
 
-  broadcast({ type: 'ai_start', contactId: contact.id });
+  broadcast({ type: 'ai_start', contactId: contact.id, fresh: true });
 
   try {
     await ai.generateSuggestions(contact.id, chatHistory, {

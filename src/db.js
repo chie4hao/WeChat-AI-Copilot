@@ -68,7 +68,6 @@ function upsertContact({ wxid, name, avatar }) {
     INSERT INTO contacts (wxid, name, avatar, last_time)
     VALUES (@wxid, @name, @avatar, @last_time)
     ON CONFLICT(wxid) DO UPDATE SET
-      name = excluded.name,
       avatar = COALESCE(excluded.avatar, avatar)
   `).run({ wxid, name, avatar: avatar || null, last_time: Date.now() });
 
