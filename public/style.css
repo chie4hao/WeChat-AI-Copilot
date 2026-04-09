@@ -648,14 +648,14 @@ body {
 }
 
 .mock-controls {
-  display: none;
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 0 12px 10px;
 }
 
-.mock-controls.open { display: flex; }
+.mock-controls.closed { display: none; }
 
 .mock-input {
   background: #2a2a2a;

@@ -446,6 +446,9 @@ function onAiStart() {
 
   showAiLoading();
   scrollToBottom(aiBody);
+
+  // 移动端自动跳到 AI 面板
+  if (!isDesktop()) showPanel('ai');
 }
 
 function onAiChunk(chunk) {
@@ -550,8 +553,8 @@ followupInput.addEventListener('keydown', e => {
 const mockSelfLabel = $('mockSelfLabel');
 
 mockToggle.addEventListener('click', () => {
-  const open = mockControls.classList.toggle('open');
-  mockToggleArrow.textContent = open ? '▼' : '▲';
+  const closed = mockControls.classList.toggle('closed');
+  mockToggleArrow.textContent = closed ? '▲' : '▼';
 });
 
 // 勾选"我发的"时隐藏联系人名（用当前联系人），取消时显示
