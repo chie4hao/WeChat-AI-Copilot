@@ -44,6 +44,10 @@ const modalInput    = $('modalInput');
 const modalCancel   = $('modalCancel');
 const modalConfirm  = $('modalConfirm');
 const confirmMask   = $('confirmMask');
+const notesMask     = $('notesMask');
+const notesInput    = $('notesInput');
+const notesCancel   = $('notesCancel');
+const notesSave     = $('notesSave');
 const confirmTitle  = $('confirmTitle');
 const confirmBody   = $('confirmBody');
 const confirmCancel = $('confirmCancel');
@@ -575,6 +579,36 @@ function hideCtxMenu() { ctxMenu.hidden = true; ctxContactId = null; }
 
 document.addEventListener('click', hideCtxMenu);
 document.addEventListener('touchstart', hideCtxMenu, { passive: true });
+
+$('ctxNotes').addEventListener('click', () => {
+  const c = contacts.find(x => x.id === ctxContactId);
+  if (!c) return;
+  notesInput.value = c.notes || '';
+  notesMask.hidden = false;
+  setTimeout(() => notesInput.focus(), 50);
+
+  const doSave = async () => {
+    notesMask.hidden = true;
+    cleanup();
+    await api('POST', `/api/contacts/${c.id}/notes`, { notes: notesInput.value.trim() });
+    // 更新本地缓存
+    const local = contacts.find(x => x.id === c.id);
+    if (local) local.notes = notesInput.value.trim();
+  };
+  const doCancel = () => { notesMask.hidden = true; cleanup(); };
+  const onKey = (e) => { if (e.key === 'Escape') doCancel(); };
+
+  notesSave.addEventListener('click', doSave);
+  notesCancel.addEventListener('click', doCancel);
+  notesMask.addEventListener('click', e => { if (e.target === notesMask) doCancel(); });
+  notesInput.addEventListener('keydown', onKey);
+
+  function cleanup() {
+    notesSave.removeEventListener('click', doSave);
+    notesCancel.removeEventListener('click', doCancel);
+    notesInput.removeEventListener('keydown', onKey);
+  }
+});
 
 ctxRename.addEventListener('click', () => {
   const c = contacts.find(x => x.id === ctxContactId);

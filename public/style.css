@@ -240,6 +240,21 @@ body {
 
 .modal-input:focus { border-color: var(--accent); }
 
+.modal-textarea {
+  width: 100%;
+  min-height: 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  margin-bottom: 16px;
+  resize: vertical;
+  line-height: 1.6;
+}
+.modal-textarea:focus { border-color: var(--accent); }
+
 .modal-actions {
   display: flex;
   gap: 10px;

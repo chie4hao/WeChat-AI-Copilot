@@ -101,8 +101,21 @@
   <!-- 右键/长按上下文菜单 -->
   <div class="ctx-menu" id="ctxMenu" hidden>
     <button class="ctx-item" id="ctxRename">&#9998; 修改名称</button>
+    <button class="ctx-item" id="ctxNotes">&#128203; 编辑资料</button>
     <button class="ctx-item" id="ctxClear">&#128465; 清空聊天记录</button>
     <button class="ctx-item ctx-danger" id="ctxDelete">&#10006; 删除联系人</button>
+  </div>
+
+  <!-- 资料编辑弹窗 -->
+  <div class="modal-mask" id="notesMask" hidden>
+    <div class="modal">
+      <div class="modal-title" id="notesTitle">编辑资料</div>
+      <textarea class="modal-textarea" id="notesInput" placeholder="填写联系人资料，AI 会参考这些内容给出建议。例如：&#10;性别：女&#10;关系：同学&#10;性格：活泼外向&#10;注意：最近在备考"></textarea>
+      <div class="modal-actions">
+        <button class="modal-btn modal-cancel" id="notesCancel">取消</button>
+        <button class="modal-btn modal-confirm" id="notesSave">保存</button>
+      </div>
+    </div>
   </div>
 
   <!-- 通用输入弹窗 -->
