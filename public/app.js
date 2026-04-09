@@ -14,6 +14,7 @@ const messages       = $('messages');
 const chatPlaceholder = $('chatPlaceholder');
 const aiPlaceholder  = $('aiPlaceholder');
 const aiBody         = $('aiBody');
+const aiCurrent      = $('aiCurrent');
 const aiAnalysis     = $('aiAnalysis');
 const aiCandidates   = $('aiCandidates');
 const aiHistory      = $('aiHistory');
@@ -155,9 +156,11 @@ function renderContactList(list) {
   `).join('');
 
   contactList.querySelectorAll('.contact-item').forEach(el => {
-    el.addEventListener('click', () => selectContact(Number(el.dataset.id)));
-    el.addEventListener('contextmenu', e => { e.preventDefault(); showCtxMenu(e, Number(el.dataset.id)); });
-    addLongPressListener(el, (e) => showCtxMenu(e, Number(el.dataset.id)));
+    const id = Number(el.dataset.id);
+    if (aiGeneratingIds.has(id)) el.classList.add('ai-generating');
+    el.addEventListener('click', () => selectContact(id));
+    el.addEventListener('contextmenu', e => { e.preventDefault(); showCtxMenu(e, id); });
+    addLongPressListener(el, (e) => showCtxMenu(e, id));
   });
 }
 
@@ -361,6 +364,18 @@ function connectWs() {
   });
 }
 
+// 正在生成 AI 的联系人 id 集合（用于联系人列表显示 spinner）
+const aiGeneratingIds = new Set();
+
+function setContactGenerating(contactId, on) {
+  if (on) aiGeneratingIds.add(contactId);
+  else aiGeneratingIds.delete(contactId);
+  // 更新对应联系人行
+  const li = contactList.querySelector(`[data-id="${contactId}"]`);
+  if (!li) return;
+  li.classList.toggle('ai-generating', on);
+}
+
 function handleWsEvent(evt) {
   switch (evt.type) {
     case 'message':
@@ -370,15 +385,18 @@ function handleWsEvent(evt) {
       loadContacts();
       break;
     case 'ai_start':
+      setContactGenerating(evt.contactId, true);
       if (evt.contactId === currentContactId) onAiStart();
       break;
     case 'ai_chunk':
       if (evt.contactId === currentContactId) onAiChunk(evt.chunk);
       break;
     case 'ai_complete':
+      setContactGenerating(evt.contactId, false);
       if (evt.contactId === currentContactId) onAiComplete(evt.result);
       break;
     case 'ai_error':
+      setContactGenerating(evt.contactId, false);
       if (evt.contactId === currentContactId) onAiError(evt.error);
       break;
   }
@@ -391,6 +409,21 @@ function handleIncomingMessage(evt) {
 }
 
 /* ── AI streaming handlers ───────────────────────────────────── */
+
+let _aiLoadingEl = null;
+
+function showAiLoading(text = 'AI 生成中…') {
+  if (_aiLoadingEl) return;
+  _aiLoadingEl = document.createElement('div');
+  _aiLoadingEl.className = 'ai-loading';
+  _aiLoadingEl.innerHTML = '<div class="spinner"></div><span>' + text + '</span>';
+  aiCurrent.insertBefore(_aiLoadingEl, aiAnalysis);
+}
+
+function hideAiLoading() {
+  if (_aiLoadingEl) { _aiLoadingEl.remove(); _aiLoadingEl = null; }
+}
+
 function onAiStart() {
   isStreaming = true;
   hasAiSession = true;
@@ -404,16 +437,21 @@ function onAiStart() {
   aiPlaceholder.style.display = 'none';
   aiBody.style.display = 'flex';
   aiFollowup.style.display = 'flex';
-  setFollowupEnabled(false); // disable during generation
+  setFollowupEnabled(false);
+
+  showAiLoading();
+  scrollToBottom(aiBody);
 }
 
 function onAiChunk(chunk) {
+  hideAiLoading(); // remove spinner on first real content
   aiAnalysis.textContent += chunk;
   scrollToBottom(aiBody);
 }
 
 function onAiComplete(result) {
   isStreaming = false;
+  hideAiLoading();
   aiAnalysis.classList.remove('streaming');
 
   // Render candidates starting after existing ones
@@ -426,8 +464,9 @@ function onAiComplete(result) {
 
 function onAiError(errMsg) {
   isStreaming = false;
+  hideAiLoading();
   aiAnalysis.classList.remove('streaming');
-  aiAnalysis.textContent += `\n\n[错误：${errMsg}]`;
+  aiAnalysis.textContent += `[错误：${errMsg}]`;
   setFollowupEnabled(true);
 }
 

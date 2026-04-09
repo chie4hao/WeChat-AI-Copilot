@@ -358,6 +358,20 @@ body {
   flex-shrink: 0;
 }
 
+/* AI 生成中：联系人行右侧小 spinner */
+.contact-item.ai-generating::after {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 /* ── Chat messages ───────────────────────────────────────────── */
 .messages {
   flex: 1;
@@ -432,7 +446,7 @@ body {
   min-height: 48px;
 }
 
-.ai-analysis:empty { display: none; }
+.ai-analysis:empty:not(.streaming) { display: none; }
 
 .ai-analysis.streaming::after {
   content: '▋';
