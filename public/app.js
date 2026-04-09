@@ -518,10 +518,11 @@ mockSend.addEventListener('click', async () => {
     wxid = contact.wxid;
     name = contact.name;
   } else {
-    // "对方发的" → 用 name 字段（自动填充了当前联系人名，用户可改）
+    // "对方发的" → 如果当前选中联系人且名字匹配，直接用该联系人的 wxid
     name = mockName.value.trim();
     if (!name) { alert('请输入联系人名'); return; }
-    wxid = `mock_${name}`;
+    const matched = currentContactId && contacts.find(c => c.id === currentContactId && c.name === name);
+    wxid = matched ? matched.wxid : `mock_${name}`;
   }
 
   const noAi = $('mockNoAi').checked;
