@@ -142,6 +142,16 @@ function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' })
   return result.lastInsertRowid;
 }
 
+function deleteMessage(messageId) {
+  getDb().prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+}
+
+function updateMessage(messageId, { content, isSelf }) {
+  const db = getDb();
+  if (content !== undefined) db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content, messageId);
+  if (isSelf !== undefined)  db.prepare('UPDATE messages SET is_self = ? WHERE id = ?').run(isSelf ? 1 : 0, messageId);
+}
+
 function getRecentMessages(contactId, limit = 200) {
   return getDb().prepare(`
     SELECT * FROM messages
@@ -221,6 +231,8 @@ export {
   clearMessages,
   deleteContact,
   insertMessage,
+  deleteMessage,
+  updateMessage,
   getRecentMessages,
   resetAiSession,
   getAiSession,

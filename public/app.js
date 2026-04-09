@@ -35,6 +35,9 @@ const mockTrigger   = $('mockTrigger');
 // 联系人管理
 const addContactBtn = $('addContactBtn');
 const ctxMenu       = $('ctxMenu');
+
+// 消息管理
+const msgCtxMenu    = $('msgCtxMenu');
 const ctxRename     = $('ctxRename');
 const ctxClear      = $('ctxClear');
 const ctxDelete     = $('ctxDelete');
@@ -204,6 +207,10 @@ async function loadMessages(contactId) {
 
 function renderMessages(msgs) {
   messages.innerHTML = msgs.map(m => buildMessageEl(m)).join('');
+  messages.querySelectorAll('.message').forEach(el => {
+    el.addEventListener('contextmenu', e => { e.preventDefault(); showMsgCtxMenu(e, el); });
+    addLongPressListener(el, e => showMsgCtxMenu(e, el));
+  });
 }
 
 function buildMessageEl(m) {
@@ -211,7 +218,7 @@ function buildMessageEl(m) {
   const contact = contacts.find(c => c.id === m.contact_id);
   const senderName = m.is_self ? '我' : (contact ? contact.name : '对方');
   return `
-    <div class="message ${cls}">
+    <div class="message ${cls}" data-msg-id="${m.id}" data-is-self="${m.is_self}">
       <div class="msg-sender">${esc(senderName)}</div>
       <div class="msg-bubble">${esc(m.content)}</div>
       <div class="msg-time">${formatTime(m.timestamp)}</div>
@@ -222,7 +229,10 @@ function buildMessageEl(m) {
 function appendMessage(msg) {
   const div = document.createElement('div');
   div.innerHTML = buildMessageEl(msg);
-  messages.appendChild(div.firstElementChild);
+  const el = div.firstElementChild;
+  el.addEventListener('contextmenu', e => { e.preventDefault(); showMsgCtxMenu(e, el); });
+  addLongPressListener(el, e => showMsgCtxMenu(e, el));
+  messages.appendChild(el);
   scrollToBottom(messages);
 }
 
@@ -544,6 +554,72 @@ mockTrigger.addEventListener('click', async () => {
     return;
   }
   await api('POST', '/api/mock/trigger', { contactId: currentContactId });
+});
+
+/* ── Message context menu ────────────────────────────────────── */
+
+let ctxMsgId = null;
+let ctxMsgEl = null;
+
+function showMsgCtxMenu(e, el) {
+  ctxMsgId = Number(el.dataset.msgId);
+  ctxMsgEl = el;
+  const x = e.clientX ?? e.pageX;
+  const y = e.clientY ?? e.pageY;
+  msgCtxMenu.hidden = false;
+  const mw = msgCtxMenu.offsetWidth || 160;
+  const mh = msgCtxMenu.offsetHeight || 110;
+  msgCtxMenu.style.left = Math.min(x, window.innerWidth - mw - 8) + 'px';
+  msgCtxMenu.style.top  = Math.min(y, window.innerHeight - mh - 8) + 'px';
+}
+
+function hideMsgCtxMenu() { msgCtxMenu.hidden = true; ctxMsgId = null; ctxMsgEl = null; }
+
+document.addEventListener('click', hideMsgCtxMenu);
+document.addEventListener('touchstart', hideMsgCtxMenu, { passive: true });
+
+$('msgCtxDelete').addEventListener('click', async () => {
+  if (!ctxMsgId) return;
+  const id = ctxMsgId;
+  const el = ctxMsgEl;
+  hideMsgCtxMenu();
+  await api('DELETE', `/api/messages/${id}`);
+  el?.remove();
+});
+
+$('msgCtxFlip').addEventListener('click', async () => {
+  if (!ctxMsgId || !ctxMsgEl) return;
+  const id = ctxMsgId;
+  const el = ctxMsgEl;
+  const wasSelf = el.dataset.isSelf === '1';
+  hideMsgCtxMenu();
+  await api('POST', `/api/messages/${id}`, { isSelf: !wasSelf });
+  // Update element in place
+  el.dataset.isSelf = wasSelf ? '0' : '1';
+  el.classList.toggle('self', !wasSelf);
+  el.classList.toggle('other', wasSelf);
+  const senderEl = el.querySelector('.msg-sender');
+  if (senderEl) {
+    if (!wasSelf) {
+      senderEl.textContent = '我';
+    } else {
+      const contact = contacts.find(c => c.id === currentContactId);
+      senderEl.textContent = contact ? contact.name : '对方';
+    }
+  }
+});
+
+$('msgCtxEdit').addEventListener('click', () => {
+  if (!ctxMsgId || !ctxMsgEl) return;
+  const id = ctxMsgId;
+  const el = ctxMsgEl;
+  const bubbleEl = el.querySelector('.msg-bubble');
+  const currentText = bubbleEl?.textContent ?? '';
+  hideMsgCtxMenu();
+  showInputModal('编辑消息', currentText, '消息内容', async (newContent) => {
+    await api('POST', `/api/messages/${id}`, { content: newContent });
+    if (bubbleEl) bubbleEl.textContent = newContent;
+  });
 });
 
 /* ── Contact management ──────────────────────────────────────── */

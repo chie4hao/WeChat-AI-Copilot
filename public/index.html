@@ -98,12 +98,19 @@
     </button>
   </nav>
 
-  <!-- 右键/长按上下文菜单 -->
+  <!-- 右键/长按上下文菜单（联系人） -->
   <div class="ctx-menu" id="ctxMenu" hidden>
     <button class="ctx-item" id="ctxRename">&#9998; 修改名称</button>
     <button class="ctx-item" id="ctxNotes">&#128203; 编辑资料</button>
     <button class="ctx-item" id="ctxClear">&#128465; 清空聊天记录</button>
     <button class="ctx-item ctx-danger" id="ctxDelete">&#10006; 删除联系人</button>
+  </div>
+
+  <!-- 右键/长按上下文菜单（消息） -->
+  <div class="ctx-menu" id="msgCtxMenu" hidden>
+    <button class="ctx-item" id="msgCtxEdit">&#9998; 编辑内容</button>
+    <button class="ctx-item" id="msgCtxFlip">&#8644; 切换方向</button>
+    <button class="ctx-item ctx-danger" id="msgCtxDelete">&#10006; 删除</button>
   </div>
 
   <!-- 资料编辑弹窗 -->

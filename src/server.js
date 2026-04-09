@@ -79,6 +79,19 @@ app.get('/api/contacts/:id/messages', (req, res) => {
   res.json(db.getRecentMessages(contactId, limit));
 });
 
+// ── API: Message management ───────────────────────────────────
+
+app.delete('/api/messages/:id', (req, res) => {
+  db.deleteMessage(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+app.post('/api/messages/:id', (req, res) => {
+  const { content, isSelf } = req.body;
+  db.updateMessage(Number(req.params.id), { content, isSelf });
+  res.json({ ok: true });
+});
+
 // ── API: AI Session ───────────────────────────────────────────
 
 app.get('/api/contacts/:id/ai-session', (req, res) => {
