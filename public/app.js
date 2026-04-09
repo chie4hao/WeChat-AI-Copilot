@@ -60,10 +60,10 @@ const confirmOk     = $('confirmOk');
 /* ── Helpers ─────────────────────────────────────────────────── */
 function formatTime(ms) {
   const d = new Date(ms);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  const hhmm = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const isToday = d.toDateString() === new Date().toDateString();
+  if (isToday) return hhmm;
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${hhmm}`;
 }
 
 function avatarChar(name) {
