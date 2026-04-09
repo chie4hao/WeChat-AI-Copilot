@@ -350,14 +350,15 @@
       }
 
       // 尝试自动匹配昵称
-      selfName = parsed.names.find(n => n === configuredMyName) || null;
+      // 优先在消息发送者里找；若自己没发消息但 my_name 已配置，也直接用（所有消息均为对方）
+      selfName = parsed.names.find(n => n === configuredMyName) || configuredMyName || null;
 
       if (selfName) {
         // 自动匹配成功，直接预览
         selfSection.hidden = true;
         renderPreview();
       } else {
-        // 没有配置昵称或匹配失败，手动选择
+        // 没有配置昵称，手动选择
         selfSelect.innerHTML = '';
         parsed.names.forEach(name => {
           const btn = document.createElement('button');
@@ -372,9 +373,7 @@
           selfSelect.appendChild(btn);
         });
         selfSection.hidden = false;
-        showToast(configuredMyName
-          ? `未找到昵称"${configuredMyName}"，请手动选择`
-          : '请去设置填写昵称，或手动点击选择');
+        showToast('请去设置填写昵称，或手动点击选择');
       }
     });
 
