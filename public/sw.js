@@ -10,7 +10,7 @@ self.addEventListener('push', (e) => {
   e.waitUntil(self.registration.showNotification(data.title || 'AI Copilot', {
     body:      data.body || 'AI 建议已生成',
     icon:      '/icon-192.png',
-    badge:     '/icon-192.png',
+    badge:     '/badge-96.png',
     tag:       'ai-suggestion',   // 同 tag 的通知会覆盖，不堆叠
     renotify:  true,
     data:      { contactId: data.contactId },
