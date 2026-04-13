@@ -61,6 +61,14 @@ function initSchema() {
   }
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS ai_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       contact_id INTEGER NOT NULL UNIQUE,
@@ -282,6 +290,24 @@ function getFullAiSession(contactId) {
   };
 }
 
+// ── Push Subscriptions ────────────────────────────────────────
+
+function savePushSubscription({ endpoint, p256dh, auth }) {
+  getDb().prepare(`
+    INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at)
+    VALUES (@endpoint, @p256dh, @auth, @createdAt)
+    ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth
+  `).run({ endpoint, p256dh, auth, createdAt: Date.now() });
+}
+
+function removePushSubscription(endpoint) {
+  getDb().prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+}
+
+function getAllPushSubscriptions() {
+  return getDb().prepare('SELECT * FROM push_subscriptions').all();
+}
+
 export {
   getDb,
   upsertContact,
@@ -303,4 +329,7 @@ export {
   insertUserFollowup,
   getAiMessages,
   getFullAiSession,
+  savePushSubscription,
+  removePushSubscription,
+  getAllPushSubscriptions,
 };

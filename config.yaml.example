@@ -18,6 +18,11 @@ server:
   # IP 白名单（可选，限制哪些 IP 可以访问）
   # allowedIPs:
   #   - "127.0.0.1"
+  # Web Push 推送通知（可选）
+  # 生成方法：npx web-push generate-vapid-keys
+  # vapid_subject: "mailto:you@example.com"
+  # vapid_public_key: "BxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxA"
+  # vapid_private_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # 系统 prompt：写你的人设和回复要求
 # 聊天记录由程序自动从数据库读取并拼入，不需要在这里写

@@ -6,11 +6,23 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 
+import webpush from 'web-push';
 import config from './config.js';
 import * as db from './db.js';
 
 // 本地端上报的 secret（从 config.yaml 读取）
 const syncSecret = config.get().server?.sync_secret ?? '';
+
+// ── Web Push VAPID 初始化 ─────────────────────────────────────
+const vapidPublicKey  = config.get().server?.vapid_public_key ?? '';
+const vapidPrivateKey = config.get().server?.vapid_private_key ?? '';
+const vapidSubject    = config.get().server?.vapid_subject ?? 'mailto:admin@example.com';
+if (vapidPublicKey && vapidPrivateKey) {
+  webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+  console.log('[push] Web Push 已启用');
+} else {
+  console.log('[push] 未配置 VAPID 密钥，推送通知不可用');
+}
 import * as ai from './ai.js';
 import wechat from './wechat.js';
 
@@ -293,6 +305,27 @@ app.post('/api/sync', (req, res) => {
   }
 });
 
+// ── API: Push Subscription ────────────────────────────────────
+
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  res.json({ key: vapidPublicKey || null });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+  const { endpoint, keys } = req.body;
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    return res.status(400).json({ error: 'endpoint and keys are required' });
+  }
+  db.savePushSubscription({ endpoint, p256dh: keys.p256dh, auth: keys.auth });
+  res.json({ ok: true });
+});
+
+app.delete('/api/push/subscribe', (req, res) => {
+  const { endpoint } = req.body;
+  if (endpoint) db.removePushSubscription(endpoint);
+  res.json({ ok: true });
+});
+
 // ── API: Settings ─────────────────────────────────────────────
 
 app.get('/api/settings', (_req, res) => {
@@ -344,6 +377,34 @@ wechat.on('message', (msg) => {
   }
 });
 
+async function sendPushNotifications(contactId, contactName, firstCandidate) {
+  if (!vapidPublicKey || !vapidPrivateKey) return;
+  const subscriptions = db.getAllPushSubscriptions();
+  if (!subscriptions.length) return;
+
+  const payload = JSON.stringify({
+    title: `${contactName} — AI 建议`,
+    body: firstCandidate ? firstCandidate.slice(0, 100) : 'AI 建议已生成',
+    contactId,
+  });
+
+  for (const sub of subscriptions) {
+    try {
+      await webpush.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        payload
+      );
+    } catch (err) {
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        // 订阅已过期，清除
+        db.removePushSubscription(sub.endpoint);
+      } else {
+        console.error('[push] 发送失败:', err.message);
+      }
+    }
+  }
+}
+
 async function triggerAi(contact) {
   const chatHistory = db.getRecentMessages(contact.id);
   const session = db.resetAiSession(contact.id);
@@ -358,6 +419,7 @@ async function triggerAi(contact) {
         db.setPendingSuggestion(contact.id, true);
         broadcast({ type: 'ai_complete', contactId: contact.id, result });
         broadcast({ type: 'contacts_update' });
+        sendPushNotifications(contact.id, contact.name, result.candidates?.[0]);
       },
       onError: (err) => {
         console.error('[triggerAi] AI error:', err.message);

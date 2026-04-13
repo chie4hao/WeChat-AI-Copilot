@@ -853,6 +853,69 @@ function showConfirmModal(title, body, onConfirm) {
   }
 }
 
+/* ── Web Push ────────────────────────────────────────────────── */
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+let _pushSubscription = null;
+const pushBtn = $('pushBtn');
+
+async function initPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !pushBtn) return;
+
+  const { key } = await api('GET', '/api/push/vapid-public-key');
+  if (!key) return;  // 服务端未配置 VAPID，不显示按钮
+
+  pushBtn.hidden = false;
+  const reg = await navigator.serviceWorker.ready;
+  _pushSubscription = await reg.pushManager.getSubscription();
+  _updatePushBtn();
+}
+
+function _updatePushBtn() {
+  if (!pushBtn) return;
+  pushBtn.title   = _pushSubscription ? '关闭通知' : '开启通知';
+  pushBtn.style.opacity = _pushSubscription ? '1' : '0.4';
+}
+
+pushBtn && pushBtn.addEventListener('click', async () => {
+  const reg = await navigator.serviceWorker.ready;
+  if (_pushSubscription) {
+    // 取消订阅
+    await api('DELETE', '/api/push/subscribe', { endpoint: _pushSubscription.endpoint });
+    await _pushSubscription.unsubscribe();
+    _pushSubscription = null;
+  } else {
+    // 请求权限并订阅
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') { alert('请允许通知权限'); return; }
+
+    const { key } = await api('GET', '/api/push/vapid-public-key');
+    if (!key) return;
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key),
+    });
+    _pushSubscription = sub;
+    const j = sub.toJSON();
+    await api('POST', '/api/push/subscribe', { endpoint: j.endpoint, keys: j.keys });
+  }
+  _updatePushBtn();
+});
+
+// Service Worker → 主页面：点击通知后切换到对应联系人
+navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', (e) => {
+  if (e.data?.type === 'open_contact' && e.data.contactId) {
+    selectContact(Number(e.data.contactId));
+  }
+});
+
 /* ── Init ────────────────────────────────────────────────────── */
 async function init() {
   // On mobile, start with contacts panel active; others are hidden by CSS default
@@ -868,6 +931,7 @@ async function init() {
 
   await loadContacts();
   connectWs();
+  initPush();
 }
 
 init();

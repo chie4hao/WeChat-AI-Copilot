@@ -3,6 +3,38 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', () => self.clients.claim());
 
+// ── Web Push ──────────────────────────────────────────────────
+
+self.addEventListener('push', (e) => {
+  const data = e.data?.json() ?? {};
+  e.waitUntil(self.registration.showNotification(data.title || 'AI Copilot', {
+    body:      data.body || 'AI 建议已生成',
+    icon:      '/icon-192.png',
+    badge:     '/icon-192.png',
+    tag:       'ai-suggestion',   // 同 tag 的通知会覆盖，不堆叠
+    renotify:  true,
+    data:      { contactId: data.contactId },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const contactId = e.notification.data?.contactId;
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // 如果已有窗口打开，聚焦并通知切换联系人
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.postMessage({ type: 'open_contact', contactId });
+          return client.focus();
+        }
+      }
+      // 没有窗口则新开
+      return clients.openWindow(contactId ? `/?contact=${contactId}` : '/');
+    })
+  );
+});
+
 // ── IndexedDB helpers ─────────────────────────────────────────
 
 function openDb() {
