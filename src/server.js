@@ -8,6 +8,9 @@ import { WebSocketServer } from 'ws';
 
 import config from './config.js';
 import * as db from './db.js';
+
+// 本地端上报的 secret（从 config.yaml 读取）
+const syncSecret = config.get().server?.sync_secret ?? '';
 import * as ai from './ai.js';
 import wechat from './wechat.js';
 
@@ -252,6 +255,42 @@ app.post('/api/mock/trigger', (req, res) => {
 
   res.json({ ok: true });
   triggerAi(contact);
+});
+
+// ── API: Sync（本地端上报） ───────────────────────────────────
+
+app.post('/api/sync', (req, res) => {
+  // 验证 secret
+  if (syncSecret && req.headers['x-secret'] !== syncSecret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const { wxid, name, messages } = req.body;
+  if (!wxid || !name || !Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'wxid, name, messages[] are required' });
+  }
+
+  // 只处理文本消息
+  const textMessages = messages.filter(m => m.renderType === 'text' && m.content?.trim());
+  if (textMessages.length === 0) {
+    return res.json({ ok: true, inserted: 0, triggered: false });
+  }
+
+  // 写入数据库（自动去重）
+  const contact = db.upsertContact({ wxid, name, avatar: null });
+  const inserted = db.syncMessages({ contactId: contact.id, messages: textMessages });
+
+  broadcast({ type: 'contacts_update' });
+
+  // 有新消息且最新一条是对方发的，触发 AI
+  const hasNewIncoming = inserted > 0 && !textMessages[textMessages.length - 1].isSelf;
+  if (hasNewIncoming) {
+    const fresh = db.getContactByWxid(wxid);
+    res.json({ ok: true, inserted, triggered: true });
+    triggerAi(fresh);
+  } else {
+    res.json({ ok: true, inserted, triggered: false });
+  }
 });
 
 // ── API: Settings ─────────────────────────────────────────────

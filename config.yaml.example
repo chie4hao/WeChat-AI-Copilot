@@ -10,6 +10,8 @@ gemini:
 
 server:
   port: 3000
+  # 本地端上报的认证 token（本地端 config.yaml 的 vps.secret 要与这里一致）
+  sync_secret: "your-secret-token"
   # 填写后自动启用 HTTPS（使用已有证书，无需 Nginx/Caddy）
   # certPath: /root/cert/example.com/fullchain.pem
   # keyPath:  /root/cert/example.com/privkey.pem

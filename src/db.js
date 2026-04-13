@@ -37,8 +37,14 @@ function initSchema() {
       is_self INTEGER NOT NULL DEFAULT 0,
       timestamp INTEGER NOT NULL,
       type TEXT NOT NULL DEFAULT 'text',
+      wechat_create_time INTEGER,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
+
+    -- 用于去重：同一联系人同一微信时间戳只存一次
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup
+      ON messages (contact_id, wechat_create_time)
+      WHERE wechat_create_time IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS ai_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +147,59 @@ function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' })
   return result.lastInsertRowid;
 }
 
+/**
+ * 批量同步来自本地端的消息，自动去重。
+ * messages 格式: [{ content, isSelf, createTime(Unix秒), renderType }]
+ * 返回实际新插入的数量。
+ */
+function syncMessages({ contactId, messages }) {
+  const db = getDb();
+
+  // 迁移旧库：补加 wechat_create_time 列（若不存在）
+  const cols = db.prepare('PRAGMA table_info(messages)').all().map(r => r.name);
+  if (!cols.includes('wechat_create_time')) {
+    db.exec('ALTER TABLE messages ADD COLUMN wechat_create_time INTEGER');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup
+        ON messages (contact_id, wechat_create_time)
+        WHERE wechat_create_time IS NOT NULL
+    `);
+  }
+
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO messages (contact_id, content, is_self, timestamp, type, wechat_create_time)
+    VALUES (@contactId, @content, @isSelf, @timestamp, @type, @wechatCreateTime)
+  `);
+
+  const updateContact = db.prepare(`
+    UPDATE contacts SET last_message = @content, last_time = @timestamp WHERE id = @contactId
+  `);
+
+  let inserted = 0;
+  const insertMany = db.transaction((msgs) => {
+    for (const m of msgs) {
+      const timestampMs = m.createTime * 1000;
+      const result = insert.run({
+        contactId,
+        content: m.content || '',
+        isSelf: m.isSelf ? 1 : 0,
+        timestamp: timestampMs,
+        type: m.renderType === 'text' ? 'text' : m.renderType,
+        wechatCreateTime: m.createTime,
+      });
+      if (result.changes > 0) inserted++;
+    }
+    // 用最后一条消息更新联系人预览
+    const last = msgs[msgs.length - 1];
+    if (last) {
+      updateContact.run({ content: last.content || '', timestamp: last.createTime * 1000, contactId });
+    }
+  });
+
+  insertMany(messages);
+  return inserted;
+}
+
 function deleteMessage(messageId) {
   getDb().prepare('DELETE FROM messages WHERE id = ?').run(messageId);
 }
@@ -230,6 +289,7 @@ export {
   clearMessages,
   deleteContact,
   insertMessage,
+  syncMessages,
   deleteMessage,
   updateMessage,
   getRecentMessages,
