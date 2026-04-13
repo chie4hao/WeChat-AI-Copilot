@@ -270,8 +270,8 @@ app.post('/api/sync', (req, res) => {
     return res.status(400).json({ error: 'wxid, name, messages[] are required' });
   }
 
-  // 只处理文本消息
-  const textMessages = messages.filter(m => m.renderType === 'text' && m.content?.trim());
+  // 本地端已将图片/语音转换为文字描述，这里只过滤掉空内容的消息
+  const textMessages = messages.filter(m => m.content?.trim());
   if (textMessages.length === 0) {
     return res.json({ ok: true, inserted: 0, triggered: false });
   }
