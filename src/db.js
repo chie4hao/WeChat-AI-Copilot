@@ -46,6 +46,21 @@ function initSchema() {
       ON messages (contact_id, wechat_create_time)
       WHERE wechat_create_time IS NOT NULL;
 
+    -- 旧库迁移：补加 wechat_create_time 列
+    -- （IF NOT EXISTS 语法 SQLite 不支持，用 PRAGMA 判断）
+  `);
+
+  const cols = db.prepare('PRAGMA table_info(messages)').all().map(r => r.name);
+  if (!cols.includes('wechat_create_time')) {
+    db.exec('ALTER TABLE messages ADD COLUMN wechat_create_time INTEGER');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup
+        ON messages (contact_id, wechat_create_time)
+        WHERE wechat_create_time IS NOT NULL
+    `);
+  }
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS ai_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       contact_id INTEGER NOT NULL UNIQUE,
@@ -154,17 +169,6 @@ function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' })
  */
 function syncMessages({ contactId, messages }) {
   const db = getDb();
-
-  // 迁移旧库：补加 wechat_create_time 列（若不存在）
-  const cols = db.prepare('PRAGMA table_info(messages)').all().map(r => r.name);
-  if (!cols.includes('wechat_create_time')) {
-    db.exec('ALTER TABLE messages ADD COLUMN wechat_create_time INTEGER');
-    db.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup
-        ON messages (contact_id, wechat_create_time)
-        WHERE wechat_create_time IS NOT NULL
-    `);
-  }
 
   const insert = db.prepare(`
     INSERT OR IGNORE INTO messages (contact_id, content, is_self, timestamp, type, wechat_create_time)
