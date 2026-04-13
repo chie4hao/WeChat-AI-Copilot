@@ -265,7 +265,7 @@ app.post('/api/sync', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const { wxid, name, messages, forceTrigger = false } = req.body;
+  const { wxid, name, messages } = req.body;
   if (!wxid || !name || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'wxid, name, messages[] are required' });
   }
@@ -283,7 +283,7 @@ app.post('/api/sync', (req, res) => {
   broadcast({ type: 'contacts_update' });
 
   // 有新消息且最新一条是对方发的，触发 AI
-  const hasNewIncoming = (inserted > 0 && !textMessages[textMessages.length - 1].isSelf) || forceTrigger;
+  const hasNewIncoming = inserted > 0 && !textMessages[textMessages.length - 1].isSelf;
   if (hasNewIncoming) {
     const fresh = db.getContactByWxid(wxid);
     res.json({ ok: true, inserted, triggered: true });
