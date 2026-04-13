@@ -83,7 +83,8 @@ const panels = {
 
 let activePanelName = 'contacts';
 
-function showPanel(name) {
+// pushHistory=false 供 popstate 回调使用，避免重复入栈
+function showPanel(name, { pushHistory = true } = {}) {
   if (isDesktop()) return; // desktop shows all panels always
   activePanelName = name;
 
@@ -107,7 +108,19 @@ function showPanel(name) {
   } else {
     headerTitle.textContent = 'AI 助手';
   }
+
+  // 安卓后退键支持：切换面板时压入历史，返回 contacts 时不压（contacts 是底层）
+  if (pushHistory && name !== 'contacts') {
+    history.pushState({ panel: name }, '');
+  }
 }
+
+// 安卓/浏览器后退键：弹出历史时回退到对应面板
+window.addEventListener('popstate', (e) => {
+  if (!isDesktop()) {
+    showPanel(e.state?.panel || 'contacts', { pushHistory: false });
+  }
+});
 
 headerBack.addEventListener('click', () => {
   // Back: chat → contacts, ai → chat
@@ -909,10 +922,11 @@ pushBtn && pushBtn.addEventListener('click', async () => {
   _updatePushBtn();
 });
 
-// Service Worker → 主页面：点击通知后切换到对应联系人
-navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', (e) => {
+// Service Worker → 主页面：点击通知后切换到对应联系人并直接显示 AI 面板
+navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', async (e) => {
   if (e.data?.type === 'open_contact' && e.data.contactId) {
-    selectContact(Number(e.data.contactId));
+    await selectContact(Number(e.data.contactId));
+    if (!isDesktop()) showPanel('ai');
   }
 });
 
@@ -920,7 +934,9 @@ navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', (
 async function init() {
   // On mobile, start with contacts panel active; others are hidden by CSS default
   if (!isDesktop()) {
-    showPanel('contacts');
+    // 用 replaceState 建立 contacts 基础历史，后退到这里时不再继续出栈
+    history.replaceState({ panel: 'contacts' }, '');
+    showPanel('contacts', { pushHistory: false });
   }
 
   // Hide AI body and followup until a contact is selected
