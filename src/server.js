@@ -294,8 +294,9 @@ app.post('/api/sync', (req, res) => {
 
   broadcast({ type: 'contacts_update' });
 
-  // 有新消息且最新一条是对方发的，触发 AI
-  const hasNewIncoming = !skipAi && inserted > 0 && !textMessages[textMessages.length - 1].isSelf;
+  // 最新一条是对方发的，触发 AI
+  // 注意：全量同步后触发消息会被去重（inserted=0），但仍需触发 AI，所以不检查 inserted
+  const hasNewIncoming = !skipAi && !textMessages[textMessages.length - 1].isSelf;
   if (hasNewIncoming) {
     const fresh = db.getContactByWxid(wxid);
     res.json({ ok: true, inserted, triggered: true });
@@ -415,6 +416,10 @@ async function triggerAi(contact) {
     await ai.generateSuggestions(contact.id, chatHistory, {
       onChunk:    (chunk) => broadcast({ type: 'ai_chunk', contactId: contact.id, chunk }),
       onComplete: (result) => {
+        // 检查 session 是否仍然有效（快速连续消息时可能已被新的 triggerAi 重置）
+        const current = db.getAiSession(contact.id);
+        if (!current || current.id !== session.id) return;
+
         db.insertAiRound({ sessionId: session.id, analysis: result.message, candidates: result.candidates });
         db.setPendingSuggestion(contact.id, true);
         broadcast({ type: 'ai_complete', contactId: contact.id, result });

@@ -384,7 +384,21 @@ function connectWs() {
   });
   ws.addEventListener('close', () => {
     clearTimeout(wsReconnectTimer);
-    wsReconnectTimer = setTimeout(connectWs, 3000);
+    wsReconnectTimer = setTimeout(async () => {
+      connectWs();
+      // 重连后刷新联系人列表和 AI 面板（断线期间可能错过消息或 AI 完成事件）
+      await loadContacts();
+      if (currentContactId) {
+        await loadAiSession(currentContactId);
+        // 如果 AI 已经完成但我们错过了 ai_complete 事件，清除 loading 状态
+        if (!aiGeneratingIds.has(currentContactId)) {
+          hideAiLoading();
+          isStreaming = false;
+          aiAnalysis.classList.remove('streaming');
+          setFollowupEnabled(hasAiSession && !isStreaming);
+        }
+      }
+    }, 3000);
   });
 }
 

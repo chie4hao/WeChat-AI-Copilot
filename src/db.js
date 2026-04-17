@@ -97,6 +97,7 @@ function upsertContact({ wxid, name, avatar }) {
     INSERT INTO contacts (wxid, name, avatar, last_time)
     VALUES (@wxid, @name, @avatar, @last_time)
     ON CONFLICT(wxid) DO UPDATE SET
+      name   = excluded.name,
       avatar = COALESCE(excluded.avatar, avatar)
   `).run({ wxid, name, avatar: avatar || null, last_time: Date.now() });
 
@@ -201,10 +202,12 @@ function syncMessages({ contactId, messages }) {
       });
       if (result.changes > 0) inserted++;
     }
-    // 用最后一条消息更新联系人预览
-    const last = msgs[msgs.length - 1];
-    if (last) {
-      updateContact.run({ content: last.content || '', timestamp: last.createTime * 1000, contactId });
+    // 有新消息时才更新联系人预览（避免重复发送时用旧时间戳覆盖）
+    if (inserted > 0) {
+      const last = msgs[msgs.length - 1];
+      if (last) {
+        updateContact.run({ content: last.content || '', timestamp: last.createTime * 1000, contactId });
+      }
     }
   });
 
