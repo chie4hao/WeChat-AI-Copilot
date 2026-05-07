@@ -93,11 +93,12 @@ function buildClaudeSystem(basePrompt) {
 // ── Shared message formatting ─────────────────────────────────
 
 function formatMsgTime(ts) {
-  const d = new Date(ts);
-  const mo = d.getMonth() + 1;
-  const day = d.getDate();
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
+  // getHours() 受 VPS 时区影响；手动偏移到 UTC+8 再用 UTC getter，结果与时区无关
+  const d = new Date(ts + 8 * 3600 * 1000);
+  const mo = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
   return `${mo}月${day}日 ${hh}:${mm}`;
 }
 
