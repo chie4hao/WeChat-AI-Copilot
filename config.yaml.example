@@ -8,6 +8,13 @@ gemini:
   temperature: 0.9
   stream: true   # true=流式（逐字显示），false=等待完整结果后显示
 
+# Claude 配置（可选）：填写后自动切换为 Claude 提供商，Gemini 配置将被忽略
+# 推荐模型：claude-opus-4-7（性能最强），claude-sonnet-4-6（更快更省）
+# claude:
+#   api_key: "YOUR_ANTHROPIC_API_KEY"
+#   model: "claude-opus-4-7"
+#   candidate_count: 3
+
 server:
   port: 3000
   # 本地端上报的认证 token（本地端 config.yaml 的 vps.secret 要与这里一致）
