@@ -289,6 +289,7 @@ function renderAiSession(data) {
   aiCandidates.innerHTML = '';
   aiHistory.innerHTML = '';
   candidateOffset = 0;
+  _followupStreamEl = null;
 
   if (!data) return;
 
@@ -451,13 +452,18 @@ function handleIncomingMessage(evt) {
 /* ── AI streaming handlers ───────────────────────────────────── */
 
 let _aiLoadingEl = null;
+let _followupStreamEl = null; // 追问时在 aiHistory 内流式输出的目标元素
 
-function showAiLoading(text = 'AI 生成中…') {
+function showAiLoading(container = aiCurrent, anchor = aiAnalysis) {
   if (_aiLoadingEl) return;
   _aiLoadingEl = document.createElement('div');
   _aiLoadingEl.className = 'ai-loading';
-  _aiLoadingEl.innerHTML = '<div class="spinner"></div><span>' + text + '</span>';
-  aiCurrent.insertBefore(_aiLoadingEl, aiAnalysis);
+  _aiLoadingEl.innerHTML = '<div class="spinner"></div><span>AI 生成中…</span>';
+  if (anchor && anchor.parentNode === container) {
+    container.insertBefore(_aiLoadingEl, anchor);
+  } else {
+    container.appendChild(_aiLoadingEl);
+  }
 }
 
 function hideAiLoading() {
@@ -469,22 +475,28 @@ function onAiStart(fresh = false) {
   hasAiSession = true;
   followupBtn.disabled = true;
 
-  aiAnalysis.textContent = '';
-  aiAnalysis.classList.add('streaming');
-  aiCandidates.innerHTML = '';
-
-  // 新消息触发（fresh）：完全重置面板，清掉旧追问记录
-  if (fresh) {
-    aiHistory.innerHTML = '';
-    candidateOffset = 0;
-  }
-
   aiPlaceholder.style.display = 'none';
   aiBody.style.display = 'flex';
   aiFollowup.style.display = 'flex';
   setFollowupEnabled(false);
 
-  showAiLoading();
+  if (fresh) {
+    // 新消息触发：完全重置面板，流式输出到 aiCurrent
+    aiAnalysis.textContent = '';
+    aiAnalysis.classList.add('streaming');
+    aiCandidates.innerHTML = '';
+    aiHistory.innerHTML = '';
+    candidateOffset = 0;
+    _followupStreamEl = null;
+    showAiLoading(aiCurrent, aiAnalysis);
+  } else {
+    // 追问：在 aiHistory 末尾追加流式目标（sendFollowup 已把用户消息加到 aiHistory）
+    _followupStreamEl = document.createElement('div');
+    _followupStreamEl.className = 'history-analysis streaming';
+    aiHistory.appendChild(_followupStreamEl);
+    showAiLoading(aiHistory, null);
+  }
+
   scrollToBottom(aiBody);
 
   // 移动端自动跳到 AI 面板
@@ -492,18 +504,30 @@ function onAiStart(fresh = false) {
 }
 
 function onAiChunk(chunk) {
-  hideAiLoading(); // remove spinner on first real content
-  aiAnalysis.textContent += chunk;
+  hideAiLoading();
+  if (_followupStreamEl) {
+    _followupStreamEl.textContent += chunk;
+  } else {
+    aiAnalysis.textContent += chunk;
+  }
   scrollToBottom(aiBody);
 }
 
 function onAiComplete(result) {
   isStreaming = false;
   hideAiLoading();
-  aiAnalysis.classList.remove('streaming');
 
-  // Render candidates starting after existing ones
-  renderCandidates(aiCandidates, result.candidates || [], candidateOffset + 1);
+  if (_followupStreamEl) {
+    _followupStreamEl.classList.remove('streaming');
+    _followupStreamEl = null;
+    const container = document.createElement('div');
+    container.className = 'history-candidates';
+    renderCandidates(container, result.candidates || [], candidateOffset + 1);
+    aiHistory.appendChild(container);
+  } else {
+    aiAnalysis.classList.remove('streaming');
+    renderCandidates(aiCandidates, result.candidates || [], candidateOffset + 1);
+  }
   candidateOffset += (result.candidates || []).length;
 
   setFollowupEnabled(true);
@@ -513,8 +537,14 @@ function onAiComplete(result) {
 function onAiError(errMsg) {
   isStreaming = false;
   hideAiLoading();
-  aiAnalysis.classList.remove('streaming');
-  aiAnalysis.textContent += `[错误：${errMsg}]`;
+  if (_followupStreamEl) {
+    _followupStreamEl.classList.remove('streaming');
+    _followupStreamEl.textContent += `[错误：${errMsg}]`;
+    _followupStreamEl = null;
+  } else {
+    aiAnalysis.classList.remove('streaming');
+    aiAnalysis.textContent += `[错误：${errMsg}]`;
+  }
   setFollowupEnabled(true);
 }
 
