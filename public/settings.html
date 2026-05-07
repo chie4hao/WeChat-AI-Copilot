@@ -263,8 +263,32 @@
       </div>
     </div>
 
+    <!-- Claude API -->
+    <div class="section-title">Claude API（选填，填写后优先于 Gemini）</div>
+    <div class="settings-section">
+      <div class="setting-row">
+        <span class="setting-label">API Key</span>
+        <div class="api-key-wrap">
+          <input class="setting-input" id="claudeApiKey" type="password" placeholder="输入 Anthropic API Key（留空则使用 Gemini）">
+          <button class="toggle-visibility" id="toggleClaudeKey" title="显示/隐藏">&#128065;</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">模型</span>
+        <select class="setting-select" id="claudeModel">
+          <option value="claude-opus-4-7">claude-opus-4-7（最强）</option>
+          <option value="claude-sonnet-4-6">claude-sonnet-4-6（均衡）</option>
+          <option value="claude-haiku-4-5">claude-haiku-4-5（最快）</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">候选数量</span>
+        <input class="setting-input" id="claudeCandidateCount" type="number" min="1" max="10" value="3" style="width:80px;flex:none">
+      </div>
+    </div>
+
     <!-- Gemini API -->
-    <div class="section-title">Gemini API</div>
+    <div class="section-title">Gemini API（Claude 未配置时使用）</div>
     <div class="settings-section">
       <div class="setting-row">
         <span class="setting-label">API Key</span>
@@ -276,8 +300,11 @@
       <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="model">
-          <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
-          <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash（稳定，性价比高）</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro（最强推理）</option>
+          <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview（最新预览）</option>
+          <option value="gemini-3-flash-preview">gemini-3-flash-preview（最新快速预览）</option>
+          <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite（轻量稳定）</option>
         </select>
       </div>
       <div class="setting-row">
@@ -341,21 +368,25 @@
     const $ = (s) => document.querySelector(s);
 
     const els = {
-      myName:         $('#myName'),
-      apiKey:         $('#apiKey'),
-      toggleKey:      $('#toggleKey'),
-      model:          $('#model'),
-      candidateCount: $('#candidateCount'),
-      temperature:    $('#temperature'),
-      stream:         $('#stream'),
-      port:           $('#port'),
-      certPath:       $('#certPath'),
-      keyPath:        $('#keyPath'),
-      allowedIPs:     $('#allowedIPs'),
-      prompt:         $('#prompt'),
-      saveBtn:        $('#saveBtn'),
-      resetBtn:       $('#resetBtn'),
-      toast:          $('#toast'),
+      myName:               $('#myName'),
+      claudeApiKey:         $('#claudeApiKey'),
+      toggleClaudeKey:      $('#toggleClaudeKey'),
+      claudeModel:          $('#claudeModel'),
+      claudeCandidateCount: $('#claudeCandidateCount'),
+      apiKey:               $('#apiKey'),
+      toggleKey:            $('#toggleKey'),
+      model:                $('#model'),
+      candidateCount:       $('#candidateCount'),
+      temperature:          $('#temperature'),
+      stream:               $('#stream'),
+      port:                 $('#port'),
+      certPath:             $('#certPath'),
+      keyPath:              $('#keyPath'),
+      allowedIPs:           $('#allowedIPs'),
+      prompt:               $('#prompt'),
+      saveBtn:              $('#saveBtn'),
+      resetBtn:             $('#resetBtn'),
+      toast:                $('#toast'),
     };
 
     let originalConfig = null;
@@ -374,31 +405,53 @@
 
     function fillForm(cfg) {
       els.myName.value         = cfg.my_name || '';
+
+      // Claude
+      els.claudeApiKey.value         = cfg.claude?.api_key || '';
+      els.claudeCandidateCount.value = cfg.claude?.candidate_count ?? 3;
+      const claudeModelVal = cfg.claude?.model || 'claude-opus-4-7';
+      if (!els.claudeModel.querySelector(`option[value="${claudeModelVal}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = claudeModelVal;
+        opt.textContent = claudeModelVal;
+        els.claudeModel.appendChild(opt);
+      }
+      els.claudeModel.value = claudeModelVal;
+
+      // Gemini
       els.apiKey.value         = cfg.gemini?.api_key || '';
       els.candidateCount.value = cfg.gemini?.candidate_count ?? 3;
       els.temperature.value    = cfg.gemini?.temperature ?? 0.9;
       els.stream.checked       = cfg.gemini?.stream !== false;
+
+      // Gemini 模型：如果值不在选项里，动态添加
+      const geminiModelVal = cfg.gemini?.model || 'gemini-2.5-flash';
+      if (!els.model.querySelector(`option[value="${geminiModelVal}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = geminiModelVal;
+        opt.textContent = geminiModelVal;
+        els.model.appendChild(opt);
+      }
+      els.model.value = geminiModelVal;
+
       els.port.value           = cfg.server?.port ?? 3000;
       els.certPath.value       = cfg.server?.certPath || '';
       els.keyPath.value        = cfg.server?.keyPath || '';
       els.allowedIPs.value     = (cfg.server?.allowedIPs || []).join('\n');
       els.prompt.value         = cfg.prompt || '';
-
-      // 模型：如果值不在选项里，动态添加
-      const modelVal = cfg.gemini?.model || 'gemini-2.0-flash';
-      if (!els.model.querySelector(`option[value="${modelVal}"]`)) {
-        const opt = document.createElement('option');
-        opt.value = modelVal;
-        opt.textContent = modelVal;
-        els.model.appendChild(opt);
-      }
-      els.model.value = modelVal;
     }
 
     // ── Save ──────────────────────────────────────────────────────
     async function saveSettings() {
+      const claudeKey = els.claudeApiKey.value.trim();
       const cfg = {
         my_name: els.myName.value.trim(),
+        // 有 key 时保存完整 claude 块，无 key 时保留空块（model 偏好不丢失）
+        claude: {
+          ...(claudeKey && { api_key: claudeKey }),
+          model:           els.claudeModel.value,
+          candidate_count: parseInt(els.claudeCandidateCount.value) || 3,
+        },
         gemini: {
           api_key:         els.apiKey.value.trim(),
           model:           els.model.value,
@@ -458,6 +511,11 @@
     els.toggleKey.addEventListener('click', () => {
       const isPassword = els.apiKey.type === 'password';
       els.apiKey.type = isPassword ? 'text' : 'password';
+    });
+
+    els.toggleClaudeKey.addEventListener('click', () => {
+      const isPassword = els.claudeApiKey.type === 'password';
+      els.claudeApiKey.type = isPassword ? 'text' : 'password';
     });
 
     // ── Init ──────────────────────────────────────────────────────
