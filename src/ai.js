@@ -85,9 +85,25 @@ function getClaudeModelConfig() {
   return { model, candidate_count, systemPrompt: cfg.prompt ?? '' };
 }
 
-// Opus 4.7 不支持 temperature 等采样参数，JSON 格式通过系统提示强制输出
+// output_config 强制输出合法 JSON，比 prompt 约束更可靠（多轮追问时 Claude 可能在 JSON 前加前缀导致解析失败）
+const CLAUDE_OUTPUT_CONFIG = {
+  format: {
+    type: 'json_schema',
+    schema: {
+      type: 'object',
+      properties: {
+        message:    { type: 'string' },
+        candidates: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['message', 'candidates'],
+      additionalProperties: false,
+    },
+  },
+};
+
+// Opus 4.7 不支持 temperature 等采样参数；系统提示只描述字段含义，格式由 output_config 保证
 function buildClaudeSystem(basePrompt) {
-  return `${basePrompt}\n\n请以如下 JSON 格式输出，不要输出任何其他内容：\n{"message": "分析内容（纯文字）", "candidates": ["候选回复1", "候选回复2"]}`;
+  return `${basePrompt}\n\n【输出字段说明】\n- message：对当前对话情况的分析和回复建议（纯文字）\n- candidates：具体的候选回复文本列表`;
 }
 
 // ── Shared message formatting ─────────────────────────────────
@@ -331,6 +347,7 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
     max_tokens: 8192,
     system: [{ type: 'text', text: buildClaudeSystem(systemPrompt), cache_control: { type: 'ephemeral' } }],
     messages: apiMessages,
+    output_config: CLAUDE_OUTPUT_CONFIG,
   }, { signal: session.abortController.signal });
 
   let buffer = '';
