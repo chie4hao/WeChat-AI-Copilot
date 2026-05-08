@@ -31,6 +31,12 @@ server:
   # vapid_public_key: "BxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxA"
   # vapid_private_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
+# 过滤名单：昵称包含以下任意关键词时，不触发 AI 生成（适合屏蔽通知类账号）
+# skip_names:
+#   - "美团"
+#   - "麦当劳"
+#   - "招商银行"
+
 # 系统 prompt：写你的人设和回复要求
 # 聊天记录由程序自动从数据库读取并拼入，不需要在这里写
 prompt: |

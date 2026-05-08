@@ -345,6 +345,15 @@
       </div>
     </div>
 
+    <!-- 过滤名单 -->
+    <div class="section-title">过滤名单</div>
+    <div class="settings-section">
+      <div class="setting-row vertical">
+        <textarea class="setting-textarea" id="skipNames" rows="4" placeholder="每行一个关键词，例如：&#10;美团&#10;麦当劳&#10;招商银行"></textarea>
+        <div class="setting-hint">昵称包含任意关键词时跳过 AI 生成（不区分大小写）。适合屏蔽通知类、服务类账号。</div>
+      </div>
+    </div>
+
     <!-- Prompt -->
     <div class="section-title">系统 Prompt</div>
     <div class="settings-section">
@@ -383,6 +392,7 @@
       certPath:             $('#certPath'),
       keyPath:              $('#keyPath'),
       allowedIPs:           $('#allowedIPs'),
+      skipNames:            $('#skipNames'),
       prompt:               $('#prompt'),
       saveBtn:              $('#saveBtn'),
       resetBtn:             $('#resetBtn'),
@@ -438,6 +448,7 @@
       els.certPath.value       = cfg.server?.certPath || '';
       els.keyPath.value        = cfg.server?.keyPath || '';
       els.allowedIPs.value     = (cfg.server?.allowedIPs || []).join('\n');
+      els.skipNames.value      = (cfg.skip_names || []).join('\n');
       els.prompt.value         = cfg.prompt || '';
     }
 
@@ -467,6 +478,9 @@
             allowedIPs: els.allowedIPs.value.split('\n').map(s => s.trim()).filter(Boolean),
           }),
         },
+        ...(els.skipNames.value.trim() && {
+          skip_names: els.skipNames.value.split('\n').map(s => s.trim()).filter(Boolean),
+        }),
         prompt: els.prompt.value,
       };
 

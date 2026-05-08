@@ -118,9 +118,9 @@ function formatMsgTime(ts) {
   return `${mo}月${day}日 ${hh}:${mm}`;
 }
 
-function buildUserMessage(chatHistory, candidateCount, notes) {
+function buildUserMessage(chatHistory, candidateCount, notes, otherName = '对方') {
   const lines = chatHistory.map(m =>
-    `[${formatMsgTime(m.timestamp)}] ${m.is_self ? '我' : '她'}: ${m.content}`);
+    `[${formatMsgTime(m.timestamp)}] ${m.is_self ? '我' : otherName}: ${m.content}`);
   const parts = [];
   if (notes) parts.push(`【关于这个人】\n${notes}\n`);
   parts.push('以下是我们最近的聊天记录：', '', ...lines, '');
@@ -205,13 +205,13 @@ async function resetSession(contactId) {
 
 // ── Generate suggestions ──────────────────────────────────────
 
-async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete, onError } = {}, notes = '') {
+async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete, onError } = {}, notes = '', otherName = '对方') {
   const session = await resetSession(contactId);
   const provider = getProvider();
   const candidateCount = provider === 'claude'
     ? getClaudeModelConfig().candidate_count
     : getGeminiModelConfig().candidate_count;
-  const userMessage = buildUserMessage(chatHistory, candidateCount, notes);
+  const userMessage = buildUserMessage(chatHistory, candidateCount, notes, otherName);
   await _sendMessage(session, userMessage, { onChunk, onComplete, onError });
 }
 
@@ -229,7 +229,8 @@ async function _restoreGeminiSession(contactId) {
 
   const { model, temperature, systemInstruction, candidate_count } = getGeminiModelConfig();
   const chatHistory = db.getRecentMessages(contactId);
-  const firstUserMsg = buildUserMessage(chatHistory, candidate_count, '');
+  const otherName = db.getContactById(contactId)?.name || '对方';
+  const firstUserMsg = buildUserMessage(chatHistory, candidate_count, '', otherName);
 
   const history = [{ role: 'user', parts: [{ text: firstUserMsg }] }];
 
@@ -266,7 +267,8 @@ function _restoreClaudeSession(contactId) {
 
   const { candidate_count } = getClaudeModelConfig();
   const chatHistory = db.getRecentMessages(contactId);
-  const firstUserMsg = buildUserMessage(chatHistory, candidate_count, '');
+  const otherName = db.getContactById(contactId)?.name || '对方';
+  const firstUserMsg = buildUserMessage(chatHistory, candidate_count, '', otherName);
 
   const messages = [{ role: 'user', content: firstUserMsg }];
 

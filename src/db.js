@@ -116,6 +116,12 @@ function getContactByWxid(wxid) {
     .get(wxid);
 }
 
+function getContactById(id) {
+  return getDb()
+    .prepare('SELECT * FROM contacts WHERE id = ?')
+    .get(id);
+}
+
 function updateContactNotes(contactId, notes) {
   getDb()
     .prepare('UPDATE contacts SET notes = ? WHERE id = ?')
@@ -316,6 +322,7 @@ export {
   upsertContact,
   getContacts,
   getContactByWxid,
+  getContactById,
   updateContactNotes,
   updateContactName,
   setPendingSuggestion,

@@ -407,6 +407,13 @@ async function sendPushNotifications(contactId, contactName, firstCandidate) {
 }
 
 async function triggerAi(contact) {
+  const skipNames = config.get().skip_names || [];
+  const nameLower = contact.name.toLowerCase();
+  if (skipNames.some(s => nameLower.includes(String(s).toLowerCase()))) {
+    console.log(`[triggerAi] 跳过 ${contact.name}（在过滤列表中）`);
+    return;
+  }
+
   const chatHistory = db.getRecentMessages(contact.id);
   const session = db.resetAiSession(contact.id);
 
@@ -430,7 +437,7 @@ async function triggerAi(contact) {
         console.error('[triggerAi] AI error:', err.message);
         broadcast({ type: 'ai_error', contactId: contact.id, error: err.message });
       },
-    }, contact.notes || '');
+    }, contact.notes || '', contact.name);
   } catch (err) {
     console.error('[triggerAi] 未捕获异常:', err);
     broadcast({ type: 'ai_error', contactId: contact.id, error: err.message });
