@@ -32,6 +32,11 @@ const mockMsg       = $('mockMsg');
 const mockIsSelf    = $('mockIsSelf');
 const mockSend      = $('mockSend');
 const mockTrigger   = $('mockTrigger');
+const mockPreview   = $('mockPreview');
+const previewMask   = $('previewMask');
+const previewText   = $('previewText');
+const previewClose  = $('previewClose');
+const previewCopy   = $('previewCopy');
 
 // 联系人管理
 const addContactBtn = $('addContactBtn');
@@ -671,6 +676,39 @@ mockTrigger.addEventListener('click', async () => {
     return;
   }
   await api('POST', '/api/mock/trigger', { contactId: currentContactId });
+});
+
+/* ── 预览即将发给 AI 的内容（调试用） ─────────────────────────── */
+mockPreview.addEventListener('click', async () => {
+  if (!currentContactId) {
+    alert('请先选择一个联系人');
+    return;
+  }
+  const data = await api('GET', `/api/contacts/${currentContactId}/ai-preview`);
+  if (data?.error) {
+    alert(`获取预览失败：${data.error}`);
+    return;
+  }
+  previewText.value =
+    `# Provider: ${data.provider}    Model: ${data.model}\n\n` +
+    `========== System Prompt ==========\n${data.system}\n\n` +
+    `========== User Message ==========\n${data.user}\n`;
+  previewMask.hidden = false;
+});
+
+function hidePreview() { previewMask.hidden = true; }
+previewClose.addEventListener('click', hidePreview);
+previewMask.addEventListener('click', e => { if (e.target === previewMask) hidePreview(); });
+previewCopy.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(previewText.value);
+    previewCopy.textContent = '已复制';
+    setTimeout(() => { previewCopy.textContent = '复制全部'; }, 1500);
+  } catch {
+    // clipboard API 不可用时退回到选中文本手动复制
+    previewText.select();
+    document.execCommand('copy');
+  }
 });
 
 /* ── Message context menu ────────────────────────────────────── */

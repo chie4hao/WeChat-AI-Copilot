@@ -80,6 +80,7 @@
       <input class="mock-input mock-msg" id="mockMsg" type="text" placeholder="消息内容…">
       <button class="mock-btn" id="mockSend">发送</button>
       <button class="mock-btn" id="mockTrigger" title="对当前选中联系人手动触发 AI 生成">获取建议</button>
+      <button class="mock-btn" id="mockPreview" title="查看并复制即将发给 AI 的完整内容（不发送，仅用于调试）">预览发送</button>
     </div>
   </div>
 
@@ -146,6 +147,18 @@
       <div class="modal-actions">
         <button class="modal-btn modal-cancel" id="confirmCancel">取消</button>
         <button class="modal-btn modal-danger" id="confirmOk">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI 发送内容预览弹窗（调试用） -->
+  <div class="modal-mask" id="previewMask" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-title" id="previewTitle">即将发给 AI 的内容</div>
+      <textarea class="modal-textarea preview-text" id="previewText" readonly></textarea>
+      <div class="modal-actions">
+        <button class="modal-btn modal-cancel" id="previewClose">关闭</button>
+        <button class="modal-btn modal-confirm" id="previewCopy">复制全部</button>
       </div>
     </div>
   </div>

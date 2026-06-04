@@ -255,6 +255,18 @@ body {
 }
 .modal-textarea:focus { border-color: var(--accent); }
 
+/* 预览弹窗：更宽、内容用等宽字体方便核对格式 */
+.modal-wide { width: min(680px, 94vw); }
+.preview-text {
+  min-height: 50vh;
+  max-height: 70vh;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;

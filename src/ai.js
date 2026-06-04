@@ -118,10 +118,24 @@ function formatMsgTime(ts) {
   return `${mo}月${day}日 ${hh}:${mm}`;
 }
 
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+// 当前时间（UTC+8，含年份和星期），让 AI 判断距上一条消息隔了多久、是否该开新话题
+function formatNow() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const yr = d.getUTCFullYear();
+  const mo = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yr}年${mo}月${day}日 ${WEEKDAYS[d.getUTCDay()]} ${hh}:${mm}`;
+}
+
 function buildUserMessage(chatHistory, candidateCount, notes, otherName = '对方') {
   const lines = chatHistory.map(m =>
     `[${formatMsgTime(m.timestamp)}] ${m.is_self ? '我' : otherName}: ${m.content}`);
   const parts = [];
+  parts.push(`【当前时间】${formatNow()}\n`);
   if (notes) parts.push(`【关于这个人】\n${notes}\n`);
   parts.push('以下是我们最近的聊天记录：', '', ...lines, '');
   parts.push(`请分析当前对话情况并给出 ${candidateCount} 条候选回复。`);
@@ -213,6 +227,26 @@ async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete
     : getGeminiModelConfig().candidate_count;
   const userMessage = buildUserMessage(chatHistory, candidateCount, notes, otherName);
   await _sendMessage(session, userMessage, { onChunk, onComplete, onError });
+}
+
+// ── Preview（调试用：构造即将发给 AI 的完整内容，不实际请求）──────
+
+function buildAiPreview(chatHistory, notes = '', otherName = '对方') {
+  const provider = getProvider();
+  if (provider === 'claude') {
+    const { model, candidate_count, systemPrompt } = getClaudeModelConfig();
+    return {
+      provider, model,
+      system: buildClaudeSystem(systemPrompt),
+      user: buildUserMessage(chatHistory, candidate_count, notes, otherName),
+    };
+  }
+  const { model, candidate_count, systemInstruction } = getGeminiModelConfig();
+  return {
+    provider, model,
+    system: systemInstruction,
+    user: buildUserMessage(chatHistory, candidate_count, notes, otherName),
+  };
 }
 
 // ── Restore session（服务重启后追问时从数据库重建内存状态） ──────
@@ -422,4 +456,4 @@ async function _geminiBlockingRequest(session, message, { onComplete }) {
   onComplete?.(JSON.parse(response.text));
 }
 
-export { generateSuggestions, followUp, cancelRequest, resetSession };
+export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview };

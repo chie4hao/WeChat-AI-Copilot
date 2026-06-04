@@ -114,6 +114,15 @@ app.get('/api/contacts/:id/ai-session', (req, res) => {
   res.json(db.getFullAiSession(contactId));
 });
 
+// 预览即将发给 AI 的完整内容（调试用，不实际请求 AI）
+app.get('/api/contacts/:id/ai-preview', (req, res) => {
+  const contactId = Number(req.params.id);
+  const contact = db.getContactById(contactId);
+  if (!contact) return res.status(404).json({ error: 'Contact not found' });
+  const chatHistory = db.getRecentMessages(contactId);
+  res.json(ai.buildAiPreview(chatHistory, contact.notes || '', contact.name));
+});
+
 // ── API: Follow-up ────────────────────────────────────────────
 
 app.post('/api/contacts/:id/followup', (req, res) => {
