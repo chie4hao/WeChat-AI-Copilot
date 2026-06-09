@@ -354,6 +354,15 @@
       </div>
     </div>
 
+    <!-- 只触发名单 -->
+    <div class="section-title">只触发名单</div>
+    <div class="settings-section">
+      <div class="setting-row vertical">
+        <textarea class="setting-textarea" id="onlyNames" rows="4" placeholder="每行一个关键词，留空表示对所有人触发"></textarea>
+        <div class="setting-hint">填写后，只有昵称包含这些关键词的人收到消息时才自动触发 AI，其他人只保存消息记录。留空则对所有人触发（过滤名单仍优先生效）。手动点"获取建议"不受此限制。</div>
+      </div>
+    </div>
+
     <!-- Prompt -->
     <div class="section-title">系统 Prompt</div>
     <div class="settings-section">
@@ -393,6 +402,7 @@
       keyPath:              $('#keyPath'),
       allowedIPs:           $('#allowedIPs'),
       skipNames:            $('#skipNames'),
+      onlyNames:            $('#onlyNames'),
       prompt:               $('#prompt'),
       saveBtn:              $('#saveBtn'),
       resetBtn:             $('#resetBtn'),
@@ -449,6 +459,7 @@
       els.keyPath.value        = cfg.server?.keyPath || '';
       els.allowedIPs.value     = (cfg.server?.allowedIPs || []).join('\n');
       els.skipNames.value      = (cfg.skip_names || []).join('\n');
+      els.onlyNames.value      = (cfg.only_names || []).join('\n');
       els.prompt.value         = cfg.prompt || '';
     }
 
@@ -480,6 +491,9 @@
         },
         ...(els.skipNames.value.trim() && {
           skip_names: els.skipNames.value.split('\n').map(s => s.trim()).filter(Boolean),
+        }),
+        ...(els.onlyNames.value.trim() && {
+          only_names: els.onlyNames.value.split('\n').map(s => s.trim()).filter(Boolean),
         }),
         prompt: els.prompt.value,
       };

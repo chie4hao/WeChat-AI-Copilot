@@ -31,11 +31,17 @@ server:
   # vapid_public_key: "BxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxA"
   # vapid_private_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# 过滤名单：昵称包含以下任意关键词时，不触发 AI 生成（适合屏蔽通知类账号）
+# 过滤名单（黑名单）：昵称包含以下任意关键词时，不触发 AI 生成（适合屏蔽通知类账号）
 # skip_names:
 #   - "美团"
 #   - "麦当劳"
 #   - "招商银行"
+
+# 只触发名单（白名单）：填写后只有昵称包含这些关键词的人收到消息才自动触发 AI，
+# 其他人只保存消息记录。留空则对所有人触发（过滤名单仍优先）。手动获取建议不受限制。
+# only_names:
+#   - "小A"
+#   - "重要客户"
 
 # 系统 prompt：写你的人设和回复要求
 # 聊天记录由程序自动从数据库读取并拼入，不需要在这里写

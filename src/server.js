@@ -275,7 +275,7 @@ app.post('/api/mock/trigger', (req, res) => {
   if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
   res.json({ ok: true });
-  triggerAi(contact);
+  triggerAi(contact, { force: true }); // 手动触发无视名单
 });
 
 // ── API: Sync（本地端上报） ───────────────────────────────────
@@ -415,12 +415,26 @@ async function sendPushNotifications(contactId, contactName, firstCandidate) {
   }
 }
 
-async function triggerAi(contact) {
-  const skipNames = config.get().skip_names || [];
-  const nameLower = contact.name.toLowerCase();
-  if (skipNames.some(s => nameLower.includes(String(s).toLowerCase()))) {
-    console.log(`[triggerAi] 跳过 ${contact.name}（在过滤列表中）`);
-    return;
+// force=true 时无视名单强制触发（手动点"获取建议"），收到消息自动触发时 force=false
+async function triggerAi(contact, { force = false } = {}) {
+  if (!force) {
+    const cfg = config.get();
+    const nameLower = contact.name.toLowerCase();
+    const matchName = (s) => nameLower.includes(String(s).toLowerCase());
+
+    // 过滤名单（黑名单）：命中则跳过
+    const skipNames = cfg.skip_names || [];
+    if (skipNames.some(matchName)) {
+      console.log(`[triggerAi] 跳过 ${contact.name}（在过滤名单中）`);
+      return;
+    }
+
+    // 只触发名单（白名单）：非空时，只有命中才触发；为空则放行全部
+    const onlyNames = cfg.only_names || [];
+    if (onlyNames.length && !onlyNames.some(matchName)) {
+      console.log(`[triggerAi] 跳过 ${contact.name}（不在只触发名单中）`);
+      return;
+    }
   }
 
   const chatHistory = db.getRecentMessages(contact.id);
