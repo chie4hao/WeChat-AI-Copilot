@@ -9,10 +9,10 @@ gemini:
   stream: true   # true=流式（逐字显示），false=等待完整结果后显示
 
 # Claude 配置（可选）：填写后自动切换为 Claude 提供商，Gemini 配置将被忽略
-# 推荐模型：claude-opus-4-7（性能最强），claude-sonnet-4-6（更快更省）
+# 推荐模型：claude-opus-4-8（性能最强），claude-sonnet-4-6（更快更省）
 # claude:
 #   api_key: "YOUR_ANTHROPIC_API_KEY"
-#   model: "claude-opus-4-7"
+#   model: "claude-opus-4-8"
 #   candidate_count: 3
 
 server:

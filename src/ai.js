@@ -81,7 +81,7 @@ function getClaudeClient() {
 
 function getClaudeModelConfig() {
   const cfg = config.get();
-  const { model = 'claude-opus-4-7', candidate_count = 3 } = cfg.claude ?? {};
+  const { model = 'claude-opus-4-8', candidate_count = 3 } = cfg.claude ?? {};
   return { model, candidate_count, systemPrompt: cfg.prompt ?? '' };
 }
 
@@ -101,7 +101,7 @@ const CLAUDE_OUTPUT_CONFIG = {
   },
 };
 
-// Opus 4.7 不支持 temperature 等采样参数；系统提示只描述字段含义，格式由 output_config 保证
+// Opus 4.8 不支持 temperature 等采样参数；系统提示只描述字段含义，格式由 output_config 保证
 function buildClaudeSystem(basePrompt) {
   return `${basePrompt}\n\n【输出字段说明】\n- message：对当前对话情况的分析和回复建议（纯文字）\n- candidates：具体的候选回复文本列表`;
 }
