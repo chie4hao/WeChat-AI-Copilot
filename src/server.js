@@ -90,7 +90,7 @@ app.get('/api/contacts', (_req, res) => {
 
 app.get('/api/contacts/:id/messages', (req, res) => {
   const contactId = Number(req.params.id);
-  const limit = Number(req.query.limit) || 200;
+  const limit = Number(req.query.limit) || 350;
   res.json(db.getRecentMessages(contactId, limit));
 });
 
@@ -115,11 +115,16 @@ app.get('/api/contacts/:id/ai-session', (req, res) => {
 });
 
 // 预览即将发给 AI 的完整内容（调试用，不实际请求 AI）
+// 可选 ?upto=<messageId>：只取截止到该消息（含）的记录，配合复盘功能
 app.get('/api/contacts/:id/ai-preview', (req, res) => {
   const contactId = Number(req.params.id);
   const contact = db.getContactById(contactId);
   if (!contact) return res.status(404).json({ error: 'Contact not found' });
-  const chatHistory = db.getRecentMessages(contactId);
+  const upto = Number(req.query.upto) || 0;
+  const chatHistory = upto
+    ? db.getMessagesUpTo(contactId, upto)
+    : db.getRecentMessages(contactId);
+  if (!chatHistory) return res.status(404).json({ error: 'Message not found' });
   res.json(ai.buildAiPreview(chatHistory, contact.notes || '', contact.name));
 });
 
@@ -267,15 +272,22 @@ app.post('/api/mock/message', (req, res) => {
 
 // 手动为某个联系人触发 AI 生成（不注入新消息，直接用现有聊天记录）
 app.post('/api/mock/trigger', (req, res) => {
-  const { contactId } = req.body;
+  const { contactId, uptoMessageId } = req.body;
   if (!contactId) return res.status(400).json({ error: 'contactId is required' });
 
   const contacts = db.getContacts();
   const contact = contacts.find(c => c.id === Number(contactId));
   if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
+  // 复盘模式：以历史某条消息为最后一条，验证消息存在后把截断的记录传给 triggerAi
+  let chatHistory = null;
+  if (uptoMessageId) {
+    chatHistory = db.getMessagesUpTo(contact.id, Number(uptoMessageId));
+    if (!chatHistory?.length) return res.status(404).json({ error: 'Message not found' });
+  }
+
   res.json({ ok: true });
-  triggerAi(contact, { force: true }); // 手动触发无视名单
+  triggerAi(contact, { force: true, chatHistory }); // 手动触发无视名单
 });
 
 // ── API: Sync（本地端上报） ───────────────────────────────────
@@ -416,7 +428,8 @@ async function sendPushNotifications(contactId, contactName, firstCandidate) {
 }
 
 // force=true 时无视名单强制触发（手动点"获取建议"），收到消息自动触发时 force=false
-async function triggerAi(contact, { force = false } = {}) {
+// chatHistory 传入时直接使用（复盘模式的截断记录），否则取最近记录
+async function triggerAi(contact, { force = false, chatHistory = null } = {}) {
   if (!force) {
     const cfg = config.get();
     const nameLower = contact.name.toLowerCase();
@@ -437,13 +450,13 @@ async function triggerAi(contact, { force = false } = {}) {
     }
   }
 
-  const chatHistory = db.getRecentMessages(contact.id);
+  const history = chatHistory ?? db.getRecentMessages(contact.id);
   const session = db.resetAiSession(contact.id);
 
   broadcast({ type: 'ai_start', contactId: contact.id, fresh: true });
 
   try {
-    await ai.generateSuggestions(contact.id, chatHistory, {
+    await ai.generateSuggestions(contact.id, history, {
       onChunk:    (chunk) => broadcast({ type: 'ai_chunk', contactId: contact.id, chunk }),
       onComplete: (result) => {
         // 检查 session 是否仍然有效（快速连续消息时可能已被新的 triggerAi 重置）

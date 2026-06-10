@@ -231,13 +231,29 @@ function updateMessage(messageId, { content, isSelf }) {
   if (isSelf !== undefined)  db.prepare('UPDATE messages SET is_self = ? WHERE id = ?').run(isSelf ? 1 : 0, messageId);
 }
 
-function getRecentMessages(contactId, limit = 200) {
+function getRecentMessages(contactId, limit = 350) {
   return getDb().prepare(`
     SELECT * FROM messages
     WHERE contact_id = ?
     ORDER BY timestamp DESC
     LIMIT ?
   `).all(contactId, limit).reverse();
+}
+
+// 复盘用：取截止到某条消息（含）的最近 limit 条，找不到该消息返回 null
+function getMessagesUpTo(contactId, messageId, limit = 350) {
+  const target = getDb()
+    .prepare('SELECT * FROM messages WHERE id = ? AND contact_id = ?')
+    .get(messageId, contactId);
+  if (!target) return null;
+
+  return getDb().prepare(`
+    SELECT * FROM messages
+    WHERE contact_id = ?
+      AND (timestamp < ? OR (timestamp = ? AND id <= ?))
+    ORDER BY timestamp DESC, id DESC
+    LIMIT ?
+  `).all(contactId, target.timestamp, target.timestamp, target.id, limit).reverse();
 }
 
 // ── AI Sessions ───────────────────────────────────────────────
@@ -333,6 +349,7 @@ export {
   deleteMessage,
   updateMessage,
   getRecentMessages,
+  getMessagesUpTo,
   resetAiSession,
   getAiSession,
   insertAiRound,

@@ -154,7 +154,8 @@ getContactByWxid(wxid)                       // 按 wxid 查
 updateContactNotes(contactId, notes)
 setPendingSuggestion(contactId, value)       // value: true/false
 insertMessage({ contactId, content, isSelf, timestamp, type })  // 同时更新 last_message/last_time
-getRecentMessages(contactId, limit=200)      // 按时间戳 DESC 取，然后 reverse（返回正序）
+getRecentMessages(contactId, limit=350)      // 按时间戳 DESC 取，然后 reverse（返回正序）
+getMessagesUpTo(contactId, messageId, limit=350)  // 复盘用：截止到某条消息（含）的最近记录，消息不存在返回 null
 resetAiSession(contactId)                    // 删旧 session + ai_messages，重建新 session
 getAiSession(contactId)
 insertAiRound({ sessionId, analysis, candidates })
@@ -212,14 +213,14 @@ resetSession(contactId)   // 内部用，server.js 不直接调
 | GET | `/settings` | 返回 settings.html |
 | GET | `/import` | 返回 import.html |
 | GET | `/api/contacts` | 联系人列表（按 last_time DESC） |
-| GET | `/api/contacts/:id/messages` | 聊天记录（`?limit=200`，默认 200） |
+| GET | `/api/contacts/:id/messages` | 聊天记录（`?limit=350`，默认 350） |
 | GET | `/api/contacts/:id/ai-session` | 当前 AI session 完整内容（含 messages[]） |
 | POST | `/api/contacts/:id/followup` | 追问（body: `{ text }`） |
 | POST | `/api/contacts/:id/read` | 清除红点（has_pending_suggestion = 0） |
 | POST | `/api/contacts/:id/notes` | 更新联系人备注（body: `{ notes }`） |
 | POST | `/api/import` | 批量导入聊天记录（body: `{ wxid, otherName, messages: [{content, isSelf}] }`） |
 | POST | `/api/mock/message` | 注入单条消息（body: `{ wxid, name, content, isSelf, noAi }`） |
-| POST | `/api/mock/trigger` | 手动触发 AI 生成（body: `{ contactId }`） |
+| POST | `/api/mock/trigger` | 手动触发 AI 生成（body: `{ contactId, uptoMessageId? }`，带 uptoMessageId 时以该消息为最后一条复盘） |
 | GET | `/api/settings` | 读取 config.yaml（含 API Key，生产环境应限制 IP） |
 | POST | `/api/settings` | 保存 config.yaml（合并 server 字段，不覆盖 certPath 等） |
 
@@ -239,7 +240,7 @@ wechat.receive() 或 Mock 注入
   → wechat.js 触发 'message' 事件
   → server.js: upsertContact + insertMessage + broadcast(message) + broadcast(contacts_update)
   → 如果 !msg.isSelf：triggerAi(contact)
-      → db.getRecentMessages(200 条)
+      → db.getRecentMessages(350 条)
       → db.resetAiSession（删旧建新）
       → broadcast(ai_start)
       → ai.generateSuggestions()

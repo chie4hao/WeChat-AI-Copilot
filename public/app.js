@@ -764,6 +764,14 @@ $('msgCtxFlip').addEventListener('click', async () => {
   }
 });
 
+$('msgCtxReplay').addEventListener('click', async () => {
+  if (!ctxMsgId || !currentContactId) return;
+  const id = ctxMsgId;
+  hideMsgCtxMenu();
+  const res = await api('POST', '/api/mock/trigger', { contactId: currentContactId, uptoMessageId: id });
+  if (res.error) alert(`复盘失败：${res.error}`);
+});
+
 $('msgCtxEdit').addEventListener('click', () => {
   if (!ctxMsgId || !ctxMsgEl) return;
   const id = ctxMsgId;
