@@ -10,6 +10,7 @@ gemini:
 
 # Claude 配置（可选）：填写后自动切换为 Claude 提供商，Gemini 配置将被忽略
 # 推荐模型：claude-opus-4-8（性能最强），claude-sonnet-4-6（更快更省）
+# 也可用 claude-fable-5（最新旗舰，$10/$50 价格是 opus 的两倍，本场景提升有限）
 # claude:
 #   api_key: "YOUR_ANTHROPIC_API_KEY"
 #   model: "claude-opus-4-8"

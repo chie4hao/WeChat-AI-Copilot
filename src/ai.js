@@ -380,7 +380,8 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
 
   const stream = getClaudeClient().messages.stream({
     model,
-    max_tokens: 8192,
+    // Fable 5 的 adaptive thinking 始终开启且计入 max_tokens，给足余量防 JSON 被截断
+    max_tokens: 16384,
     system: [{ type: 'text', text: buildClaudeSystem(systemPrompt), cache_control: { type: 'ephemeral' } }],
     messages: apiMessages,
     output_config: CLAUDE_OUTPUT_CONFIG,
@@ -404,15 +405,24 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
     throw err;
   }
 
-  // 记录缓存使用情况（方便调试成本）
+  // 记录缓存使用情况（方便调试成本），同时取 stop_reason
+  let stopReason = null;
   try {
-    const { usage } = await stream.finalMessage();
-    const created = usage?.cache_creation_input_tokens ?? 0;
-    const hit    = usage?.cache_read_input_tokens ?? 0;
+    const finalMsg = await stream.finalMessage();
+    stopReason = finalMsg.stop_reason;
+    const created = finalMsg.usage?.cache_creation_input_tokens ?? 0;
+    const hit    = finalMsg.usage?.cache_read_input_tokens ?? 0;
     if (created || hit) {
       console.log(`[ai] Claude 缓存：写入=${created} 命中=${hit} tokens`);
     }
   } catch (_) {}
+
+  // Fable 5 安全分类器拒绝时返回 stop_reason: 'refusal'（HTTP 200 而非报错），
+  // 此时 buffer 不是合法 JSON，回滚 user 消息并给出明确提示
+  if (stopReason === 'refusal') {
+    session.messages.pop();
+    throw new Error('模型拒绝了本次请求（安全分类器），可在设置中换用 Opus 模型重试');
+  }
 
   session.messages.push({ role: 'assistant', content: buffer });
 
