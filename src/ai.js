@@ -106,6 +106,19 @@ function buildClaudeSystem(basePrompt) {
   return `${basePrompt}\n\n【输出字段说明】\n- message：对当前对话情况的分析和回复建议（纯文字）\n- candidates：具体的候选回复文本列表`;
 }
 
+// 1h TTL（GA，无需 beta header）：聊天稀疏时 5 分钟缓存常过期，1 小时显著提升命中率
+const CLAUDE_CACHE = { type: 'ephemeral', ttl: '1h' };
+
+// Claude 首条 user content：prefix（聊天记录，打缓存断点）+ suffix（当前时间/指令，不缓存）。
+// 对方每发一条新消息，prefix 仅尾部增长，前面部分跨"获取建议"请求稳定命中。
+function buildClaudeUserContent(chatHistory, candidateCount, notes, otherName = '对方') {
+  const { prefix, suffix } = buildUserMessageParts(chatHistory, candidateCount, notes, otherName);
+  return [
+    { type: 'text', text: prefix, cache_control: CLAUDE_CACHE },
+    { type: 'text', text: suffix },
+  ];
+}
+
 // ── Shared message formatting ─────────────────────────────────
 
 function formatMsgTime(ts) {
@@ -131,15 +144,23 @@ function formatNow() {
   return `${yr}年${mo}月${day}日 ${WEEKDAYS[d.getUTCDay()]} ${hh}:${mm}`;
 }
 
-function buildUserMessage(chatHistory, candidateCount, notes, otherName = '对方') {
+// 拆成 prefix（稳定可缓存：notes + 聊天记录）和 suffix（易变不缓存：当前时间 + 指令）。
+// 当前时间放末尾，让前面的聊天记录前缀保持稳定，便于跨请求命中前缀缓存。
+function buildUserMessageParts(chatHistory, candidateCount, notes, otherName = '对方') {
   const lines = chatHistory.map(m =>
     `[${formatMsgTime(m.timestamp)}] ${m.is_self ? '我' : otherName}: ${m.content}`);
-  const parts = [];
-  parts.push(`【当前时间】${formatNow()}\n`);
-  if (notes) parts.push(`【关于这个人】\n${notes}\n`);
-  parts.push('以下是我们最近的聊天记录：', '', ...lines, '');
-  parts.push(`请分析当前对话情况并给出 ${candidateCount} 条候选回复。`);
-  return parts.join('\n');
+  const head = [];
+  if (notes) head.push(`【关于这个人】\n${notes}\n`);
+  head.push('以下是我们最近的聊天记录：', '', ...lines);
+  const prefix = head.join('\n');
+  const suffix = `\n【当前时间】${formatNow()}\n请分析当前对话情况并给出 ${candidateCount} 条候选回复。`;
+  return { prefix, suffix };
+}
+
+// 完整 user message（Gemini、预览、restore 用），内容与 Claude 的 prefix+suffix 一致
+function buildUserMessage(chatHistory, candidateCount, notes, otherName = '对方') {
+  const { prefix, suffix } = buildUserMessageParts(chatHistory, candidateCount, notes, otherName);
+  return `${prefix}\n${suffix}`;
 }
 
 // ── Streaming JSON parser（共享，提取 message 字段值实时输出）────
@@ -225,7 +246,10 @@ async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete
   const candidateCount = provider === 'claude'
     ? getClaudeModelConfig().candidate_count
     : getGeminiModelConfig().candidate_count;
-  const userMessage = buildUserMessage(chatHistory, candidateCount, notes, otherName);
+  // Claude：拆 prefix（聊天记录，缓存）/ suffix（指令，不缓存）做前缀缓存；Gemini：整串
+  const userMessage = provider === 'claude'
+    ? buildClaudeUserContent(chatHistory, candidateCount, notes, otherName)
+    : buildUserMessage(chatHistory, candidateCount, notes, otherName);
   await _sendMessage(session, userMessage, { onChunk, onComplete, onError });
 }
 
@@ -301,10 +325,12 @@ function _restoreClaudeSession(contactId) {
 
   const { candidate_count } = getClaudeModelConfig();
   const chatHistory = db.getRecentMessages(contactId);
-  const otherName = db.getContactById(contactId)?.name || '对方';
-  const firstUserMsg = buildUserMessage(chatHistory, candidate_count, '', otherName);
+  const contact = db.getContactById(contactId);
+  const otherName = contact?.name || '对方';
+  // 用真实 notes 重建首条（与原始首轮一致），保证 restore 后追问能命中聊天记录前缀缓存
+  const firstContent = buildClaudeUserContent(chatHistory, candidate_count, contact?.notes || '', otherName);
 
-  const messages = [{ role: 'user', content: firstUserMsg }];
+  const messages = [{ role: 'user', content: firstContent }];
 
   for (const msg of fullSession.messages) {
     if (msg.type === 'ai_round') {
@@ -361,29 +387,17 @@ async function _sendMessage(session, message, { onChunk, onComplete, onError } =
 async function _claudeStreamingRequest(session, message, { onChunk, onComplete }) {
   const { model, systemPrompt } = getClaudeModelConfig();
 
+  // message：首轮是 [prefix(缓存), suffix] 的 content 数组；追问是纯文本字符串
   session.messages.push({ role: 'user', content: message });
 
-  // 构造带缓存标记的消息列表：
-  // - 系统提示永远缓存（所有请求共用）
-  // - 除当前最新 user 消息外，历史 user 消息均加 cache_control
-  //   → 多轮追问时，随轮次增加，命中越来越多的历史前缀
-  const apiMessages = session.messages.map((msg, i) => {
-    const isLast = i === session.messages.length - 1;
-    if (msg.role === 'user' && !isLast) {
-      return {
-        role: 'user',
-        content: [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } }],
-      };
-    }
-    return msg;
-  });
-
+  // 共 2 个缓存断点（≤4 上限）：system + 首条 user 的聊天记录前缀，二者覆盖绝大部分 token。
+  // 首条 content 已自带 cache_control，messages 直接用 session.messages 即可。
   const stream = getClaudeClient().messages.stream({
     model,
     // Fable 5 的 adaptive thinking 始终开启且计入 max_tokens，给足余量防 JSON 被截断
     max_tokens: 16384,
-    system: [{ type: 'text', text: buildClaudeSystem(systemPrompt), cache_control: { type: 'ephemeral' } }],
-    messages: apiMessages,
+    system: [{ type: 'text', text: buildClaudeSystem(systemPrompt), cache_control: CLAUDE_CACHE }],
+    messages: session.messages,
     output_config: CLAUDE_OUTPUT_CONFIG,
   }, { signal: session.abortController.signal });
 

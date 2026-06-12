@@ -189,19 +189,27 @@ resetSession(contactId)   // 内部用，server.js 不直接调
 5. **流式 JSON 解析**：Gemini 用 `responseSchema` 强制输出 JSON，流式时会先输出 `{"message": "` 等外壳。`_streamingRequest` 内部实时扫描 buffer，只把 `message` 字段的值作为 chunk 发出（处理转义字符），`candidates` 在 `onComplete` 里从完整 buffer 解析
 6. **responseSchema**：强制 `{ message: string, candidates: string[] }`，`responseMimeType: 'application/json'`
 
-**发给 Gemini 的 user message 格式：**
+**发给 AI 的 user message 格式（当前时间放末尾，便于前缀缓存）：**
 ```
 【关于这个人】
 {notes}
 
 以下是我们最近的聊天记录：
 
-她: ...
+{对方昵称}: ...
 我: ...
-她: ...
+{对方昵称}: ...
 
+【当前时间】2026年6月12日 周五 14:30
 请分析当前对话情况并给出 N 条候选回复。
 ```
+
+**Claude prompt caching 设计：**
+- `buildUserMessageParts` 把内容拆成 `prefix`（notes + 聊天记录，稳定）和 `suffix`（当前时间 + 指令，易变）
+- Claude 首条 user 的 content 是 block 数组：`[{text: prefix, cache_control}, {text: suffix}]`，只缓存 prefix
+- 共 2 个缓存断点：`system` + 首条 prefix（均 1h TTL，`CLAUDE_CACHE`），覆盖绝大部分 token
+- prompt caching 是账号级前缀匹配，跨 `resetSession` 也能命中——对方每发一条新消息，聊天记录前缀只在尾部增长，前面部分稳定复用
+- 各模型缓存最低 token 门槛不同（Opus 4.8/Sonnet 4.6=1024，Opus 4.7=2048，Haiku 4.5=4096，Fable 5=512）；prompt 太短时 system 单独达不到门槛，靠聊天记录撑过门槛
 
 ---
 
