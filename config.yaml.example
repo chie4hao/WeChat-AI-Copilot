@@ -15,6 +15,7 @@ gemini:
 #   api_key: "YOUR_ANTHROPIC_API_KEY"
 #   model: "claude-opus-4-8"
 #   candidate_count: 3
+#   effort: "medium"   # 思考深度 low/medium/high：越高越慢越贵（思考算输出 token），聊天建议 low/medium 够用
 
 server:
   port: 3000

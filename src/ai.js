@@ -81,23 +81,22 @@ function getClaudeClient() {
 
 function getClaudeModelConfig() {
   const cfg = config.get();
-  const { model = 'claude-opus-4-8', candidate_count = 3 } = cfg.claude ?? {};
-  return { model, candidate_count, systemPrompt: cfg.prompt ?? '' };
+  const { model = 'claude-opus-4-8', candidate_count = 3, effort = 'medium' } = cfg.claude ?? {};
+  return { model, candidate_count, effort, systemPrompt: cfg.prompt ?? '' };
 }
 
 // output_config 强制输出合法 JSON，比 prompt 约束更可靠（多轮追问时 Claude 可能在 JSON 前加前缀导致解析失败）
-const CLAUDE_OUTPUT_CONFIG = {
-  format: {
-    type: 'json_schema',
-    schema: {
-      type: 'object',
-      properties: {
-        message:    { type: 'string' },
-        candidates: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['message', 'candidates'],
-      additionalProperties: false,
+// effort 在请求时按配置注入（不影响 input 缓存命中）
+const CLAUDE_OUTPUT_FORMAT = {
+  type: 'json_schema',
+  schema: {
+    type: 'object',
+    properties: {
+      message:    { type: 'string' },
+      candidates: { type: 'array', items: { type: 'string' } },
     },
+    required: ['message', 'candidates'],
+    additionalProperties: false,
   },
 };
 
@@ -385,7 +384,7 @@ async function _sendMessage(session, message, { onChunk, onComplete, onError } =
 // ── Claude streaming ──────────────────────────────────────────
 
 async function _claudeStreamingRequest(session, message, { onChunk, onComplete }) {
-  const { model, systemPrompt } = getClaudeModelConfig();
+  const { model, systemPrompt, effort } = getClaudeModelConfig();
 
   // message：首轮是 [prefix(缓存), suffix] 的 content 数组；追问是纯文本字符串
   session.messages.push({ role: 'user', content: message });
@@ -398,7 +397,7 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
     max_tokens: 16384,
     system: [{ type: 'text', text: buildClaudeSystem(systemPrompt), cache_control: CLAUDE_CACHE }],
     messages: session.messages,
-    output_config: CLAUDE_OUTPUT_CONFIG,
+    output_config: { format: CLAUDE_OUTPUT_FORMAT, effort },
   }, { signal: session.abortController.signal });
 
   let buffer = '';

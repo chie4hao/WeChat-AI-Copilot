@@ -287,6 +287,17 @@
         <span class="setting-label">候选数量</span>
         <input class="setting-input" id="claudeCandidateCount" type="number" min="1" max="10" value="3" style="width:80px;flex:none">
       </div>
+      <div class="setting-row">
+        <span class="setting-label">思考深度</span>
+        <select class="setting-select" id="claudeEffort">
+          <option value="low">low（最省最快，聊天建议够用）</option>
+          <option value="medium">medium（平衡，推荐）</option>
+          <option value="high">high（最强，但更慢更贵）</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div class="setting-hint">思考深度越高，AI 思考越多、首字越慢、花费越高（思考算输出 token）。聊天建议场景 low/medium 通常足够。</div>
+      </div>
     </div>
 
     <!-- Gemini API -->
@@ -393,6 +404,7 @@
       toggleClaudeKey:      $('#toggleClaudeKey'),
       claudeModel:          $('#claudeModel'),
       claudeCandidateCount: $('#claudeCandidateCount'),
+      claudeEffort:         $('#claudeEffort'),
       apiKey:               $('#apiKey'),
       toggleKey:            $('#toggleKey'),
       model:                $('#model'),
@@ -431,6 +443,7 @@
       // Claude
       els.claudeApiKey.value         = cfg.claude?.api_key || '';
       els.claudeCandidateCount.value = cfg.claude?.candidate_count ?? 3;
+      els.claudeEffort.value         = cfg.claude?.effort || 'medium';
       const claudeModelVal = cfg.claude?.model || 'claude-opus-4-8';
       if (!els.claudeModel.querySelector(`option[value="${claudeModelVal}"]`)) {
         const opt = document.createElement('option');
@@ -475,6 +488,7 @@
           ...(claudeKey && { api_key: claudeKey }),
           model:           els.claudeModel.value,
           candidate_count: parseInt(els.claudeCandidateCount.value) || 3,
+          effort:          els.claudeEffort.value,
         },
         gemini: {
           api_key:         els.apiKey.value.trim(),
