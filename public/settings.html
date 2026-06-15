@@ -290,13 +290,15 @@
       <div class="setting-row">
         <span class="setting-label">思考深度</span>
         <select class="setting-select" id="claudeEffort">
-          <option value="low">low（最省最快，聊天建议够用）</option>
-          <option value="medium">medium（平衡，推荐）</option>
-          <option value="high">high（最强，但更慢更贵）</option>
+          <option value="low">low（最省最快）</option>
+          <option value="medium">medium（平衡）</option>
+          <option value="high">high（深度思考，推荐）</option>
+          <option value="xhigh">xhigh（更深，更慢更贵）</option>
+          <option value="max">max（最强，最慢最贵）</option>
         </select>
       </div>
       <div class="setting-row">
-        <div class="setting-hint">思考深度越高，AI 思考越多、首字越慢、花费越高（思考算输出 token）。聊天建议场景 low/medium 通常足够。</div>
+        <div class="setting-hint">控制 AI 思考深度（Opus/Fable 系列生效，Haiku 不支持会自动忽略）。越高思考越多、回复越慢、花费越高（思考算输出 token）。想要高质量建议用 high 或 xhigh；觉得回复太浅说明思考不足，往上调。</div>
       </div>
     </div>
 

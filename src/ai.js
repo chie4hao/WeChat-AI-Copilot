@@ -108,6 +108,9 @@ function buildClaudeSystem(basePrompt) {
 // 1h TTL（GA，无需 beta header）：聊天稀疏时 5 分钟缓存常过期，1 小时显著提升命中率
 const CLAUDE_CACHE = { type: 'ephemeral', ttl: '1h' };
 
+// max_tokens 是 thinking + 输出文本的硬上限；effort 越高思考越多，留足空间防 JSON 被截断
+const MAX_TOKENS_BY_EFFORT = { low: 16384, medium: 16384, high: 32768, xhigh: 65536, max: 65536 };
+
 // Claude 首条 user content：prefix（聊天记录，打缓存断点）+ suffix（当前时间/指令，不缓存）。
 // 对方每发一条新消息，prefix 仅尾部增长，前面部分跨"获取建议"请求稳定命中。
 function buildClaudeUserContent(chatHistory, candidateCount, notes, otherName = '对方') {
@@ -389,16 +392,24 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
   // message：首轮是 [prefix(缓存), suffix] 的 content 数组；追问是纯文本字符串
   session.messages.push({ role: 'user', content: message });
 
+  // Haiku 4.5 不支持 effort / adaptive thinking；其余模型必须显式开 adaptive thinking
+  // （否则 Opus 4.8/4.7 不思考 → 回复又快又浅）。Fable 5 始终思考，传 adaptive 也安全。
+  const useThinking = !/haiku/i.test(model);
+
   // 共 2 个缓存断点（≤4 上限）：system + 首条 user 的聊天记录前缀，二者覆盖绝大部分 token。
   // 首条 content 已自带 cache_control，messages 直接用 session.messages 即可。
-  const stream = getClaudeClient().messages.stream({
+  const params = {
     model,
-    // Fable 5 的 adaptive thinking 始终开启且计入 max_tokens，给足余量防 JSON 被截断
-    max_tokens: 16384,
+    max_tokens: useThinking ? (MAX_TOKENS_BY_EFFORT[effort] ?? 32768) : 8192,
     system: [{ type: 'text', text: buildClaudeSystem(systemPrompt), cache_control: CLAUDE_CACHE }],
     messages: session.messages,
-    output_config: { format: CLAUDE_OUTPUT_FORMAT, effort },
-  }, { signal: session.abortController.signal });
+    output_config: { format: CLAUDE_OUTPUT_FORMAT },
+  };
+  if (useThinking) {
+    params.thinking = { type: 'adaptive' };
+    params.output_config.effort = effort;
+  }
+  const stream = getClaudeClient().messages.stream(params, { signal: session.abortController.signal });
 
   let buffer = '';
   const parse = makeStreamParser(onChunk);
@@ -435,6 +446,11 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
   if (stopReason === 'refusal') {
     session.messages.pop();
     throw new Error('模型拒绝了本次请求（安全分类器），可在设置中换用 Opus 模型重试');
+  }
+  // 思考 + 输出耗尽 max_tokens 时 JSON 被截断，给明确提示而非笼统的"无效 JSON"
+  if (stopReason === 'max_tokens') {
+    session.messages.pop();
+    throw new Error('回复被截断（思考占用过多 token），请在设置中降低思考深度');
   }
 
   session.messages.push({ role: 'assistant', content: buffer });
