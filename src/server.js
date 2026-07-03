@@ -361,6 +361,10 @@ app.post('/api/settings', (req, res) => {
   if (current.server) {
     incoming.server = Object.assign({}, current.server, incoming.server);
   }
+  // claude_code 同理合并（oauth_token 等字段留空时不丢失）
+  if (current.claude_code) {
+    incoming.claude_code = Object.assign({}, current.claude_code, incoming.claude_code);
+  }
   config.save(incoming);
   res.json({ ok: true });
 });

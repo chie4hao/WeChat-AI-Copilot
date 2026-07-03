@@ -87,6 +87,11 @@ function initSchema() {
       FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
     );
   `);
+
+  // 迁移：ai_sessions 增加 cc_session_id（Claude Code provider 的会话 id，服务重启后恢复追问用）
+  try {
+    db.exec('ALTER TABLE ai_sessions ADD COLUMN cc_session_id TEXT');
+  } catch (_) { /* 列已存在 */ }
 }
 
 // ── Contacts ─────────────────────────────────────────────────
@@ -276,6 +281,13 @@ function getAiSession(contactId) {
     .get(contactId);
 }
 
+// Claude Code provider：记录其内部会话 id，服务重启后可 resume 继续追问
+function setCcSessionId(contactId, ccSessionId) {
+  getDb()
+    .prepare('UPDATE ai_sessions SET cc_session_id = ? WHERE contact_id = ?')
+    .run(ccSessionId || null, contactId);
+}
+
 // ── AI Messages ───────────────────────────────────────────────
 
 function insertAiRound({ sessionId, analysis, candidates }) {
@@ -352,6 +364,7 @@ export {
   getMessagesUpTo,
   resetAiSession,
   getAiSession,
+  setCcSessionId,
   insertAiRound,
   insertUserFollowup,
   getAiMessages,

@@ -66,7 +66,7 @@ wechat-ai-copilot/
 | 微信接入 | PWA Share Target + Mock | 手机分享或手动注入，暂不接微信客户端 |
 | 后端 | Node.js + Express | HTTP/HTTPS 自动切换 |
 | 实时推送 | WebSocket（ws 库） | 流式 chunk 逐块转发到前端 |
-| AI | `@google/genai`（ESM only） | Gemini API，强制 JSON schema 输出 |
+| AI | `@google/genai` / `@anthropic-ai/sdk` / `@anthropic-ai/claude-agent-sdk` | 三 provider：Gemini API / Claude API / Claude Code（Max 订阅）。优先级：claude_code.enabled > claude.api_key > gemini。均强制 JSON schema 输出 |
 | 数据库 | better-sqlite3（SQLite） | 同步 API，WAL 模式 |
 | 配置 | config.yaml + js-yaml | 保存时合并，不会覆盖未知字段 |
 | 前端 | 原生 HTML/CSS/JS | 无框架，移动端响应式 |

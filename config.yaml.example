@@ -8,6 +8,14 @@ gemini:
   temperature: 0.9
   stream: true   # true=流式（逐字显示），false=等待完整结果后显示
 
+# Claude Code 配置（可选）：走 Claude Max 订阅额度，不产生 API 费用，启用后优先级最高
+# oauth_token 在本地电脑的 Claude Code 里运行 `claude setup-token` 生成（sk-ant-oat01- 开头）
+# claude_code:
+#   enabled: true
+#   oauth_token: "sk-ant-oat01-..."
+#   model: "claude-fable-5"   # 或 claude-opus-4-8 / claude-sonnet-4-6
+#   candidate_count: 3
+
 # Claude 配置（可选）：填写后自动切换为 Claude 提供商，Gemini 配置将被忽略
 # 推荐模型：claude-opus-4-8（性能最强），claude-sonnet-4-6（更快更省）
 # 也可用 claude-fable-5（最新旗舰，$10/$50 价格是 opus 的两倍，本场景提升有限）

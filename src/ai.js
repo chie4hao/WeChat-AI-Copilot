@@ -1,13 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 import Anthropic from '@anthropic-ai/sdk';
+import { query as ccQuery } from '@anthropic-ai/claude-agent-sdk';
 import config from './config.js';
 import * as db from './db.js';
 
 /**
  * 每个联系人维护独立的状态：
- * - provider:        'gemini' | 'claude'
+ * - provider:        'gemini' | 'claude' | 'claude-code'
  * - chat:            Gemini 多轮 chat 对象（仅 Gemini）
- * - messages:        Claude 消息数组（仅 Claude，手动维护多轮历史）
+ * - messages:        Claude 消息数组（仅 Claude API，手动维护多轮历史）
+ * - ccSessionId:     Claude Code 会话 id（仅 claude-code，多轮 resume 用）
  * - abortController: 用于取消当前正在进行的请求
  */
 const sessions = new Map();
@@ -20,8 +22,11 @@ let _geminiSysCache = null; // { name, hash, expireAt }
 
 // ── Provider detection ────────────────────────────────────────
 
+// 优先级：Claude Code（Max 订阅，免 API 费）> Claude API > Gemini
 function getProvider() {
-  return config.get().claude?.api_key ? 'claude' : 'gemini';
+  const cfg = config.get();
+  if (cfg.claude_code?.enabled) return 'claude-code';
+  return cfg.claude?.api_key ? 'claude' : 'gemini';
 }
 
 // ── Gemini helpers ────────────────────────────────────────────
@@ -83,6 +88,19 @@ function getClaudeModelConfig() {
   const cfg = config.get();
   const { model = 'claude-opus-4-8', candidate_count = 3, effort = 'medium' } = cfg.claude ?? {};
   return { model, candidate_count, effort, systemPrompt: cfg.prompt ?? '' };
+}
+
+// ── Claude Code helpers（Max 订阅，经 Agent SDK 调用，不走 API 计费）──
+
+function getClaudeCodeConfig() {
+  const cfg = config.get();
+  const cc = cfg.claude_code ?? {};
+  return {
+    model: cc.model || 'claude-fable-5',
+    oauthToken: cc.oauth_token || '',
+    candidate_count: cc.candidate_count ?? cfg.claude?.candidate_count ?? 3,
+    systemPrompt: cfg.prompt ?? '',
+  };
 }
 
 // output_config 强制输出合法 JSON，比 prompt 约束更可靠（多轮追问时 Claude 可能在 JSON 前加前缀导致解析失败）
@@ -217,7 +235,10 @@ async function resetSession(contactId) {
   cancelRequest(contactId);
   const provider = getProvider();
 
-  if (provider === 'claude') {
+  if (provider === 'claude-code') {
+    // ccSessionId 首轮请求完成后由结果回填；contactId 用于持久化 session id 到 db
+    sessions.set(contactId, { provider: 'claude-code', contactId, ccSessionId: null, abortController: new AbortController() });
+  } else if (provider === 'claude') {
     sessions.set(contactId, { provider: 'claude', messages: [], abortController: new AbortController() });
   } else {
     const { model, temperature, systemInstruction } = getGeminiModelConfig();
@@ -245,10 +266,12 @@ async function resetSession(contactId) {
 async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete, onError } = {}, notes = '', otherName = '对方') {
   const session = await resetSession(contactId);
   const provider = getProvider();
-  const candidateCount = provider === 'claude'
-    ? getClaudeModelConfig().candidate_count
-    : getGeminiModelConfig().candidate_count;
-  // Claude：拆 prefix（聊天记录，缓存）/ suffix（指令，不缓存）做前缀缓存；Gemini：整串
+  const candidateCount =
+    provider === 'claude-code' ? getClaudeCodeConfig().candidate_count :
+    provider === 'claude'      ? getClaudeModelConfig().candidate_count :
+    getGeminiModelConfig().candidate_count;
+  // Claude API：拆 prefix（聊天记录，缓存）/ suffix（指令，不缓存）做前缀缓存；
+  // Claude Code / Gemini：整串纯文本（Claude Code 内部自己管缓存）
   const userMessage = provider === 'claude'
     ? buildClaudeUserContent(chatHistory, candidateCount, notes, otherName)
     : buildUserMessage(chatHistory, candidateCount, notes, otherName);
@@ -259,6 +282,14 @@ async function generateSuggestions(contactId, chatHistory, { onChunk, onComplete
 
 function buildAiPreview(chatHistory, notes = '', otherName = '对方') {
   const provider = getProvider();
+  if (provider === 'claude-code') {
+    const { model, candidate_count, systemPrompt } = getClaudeCodeConfig();
+    return {
+      provider: 'claude-code（Max 订阅）', model,
+      system: buildClaudeSystem(systemPrompt),
+      user: buildUserMessage(chatHistory, candidate_count, notes, otherName),
+    };
+  }
   if (provider === 'claude') {
     const { model, candidate_count, systemPrompt } = getClaudeModelConfig();
     return {
@@ -278,9 +309,23 @@ function buildAiPreview(chatHistory, notes = '', otherName = '对方') {
 // ── Restore session（服务重启后追问时从数据库重建内存状态） ──────
 
 async function restoreSession(contactId) {
-  return getProvider() === 'claude'
+  const provider = getProvider();
+  if (provider === 'claude-code') return _restoreClaudeCodeSession(contactId);
+  return provider === 'claude'
     ? _restoreClaudeSession(contactId)
     : await _restoreGeminiSession(contactId);
+}
+
+// Claude Code 的多轮状态存在 VPS 磁盘（~/.claude），重启后凭 db 里的 session id 直接 resume
+function _restoreClaudeCodeSession(contactId) {
+  const row = db.getAiSession(contactId);
+  if (!row?.cc_session_id) return null;
+  sessions.set(contactId, {
+    provider: 'claude-code', contactId,
+    ccSessionId: row.cc_session_id,
+    abortController: new AbortController(),
+  });
+  return sessions.get(contactId);
 }
 
 async function _restoreGeminiSession(contactId) {
@@ -367,7 +412,9 @@ async function followUp(contactId, userText, { onChunk, onComplete, onError } = 
 
 async function _sendMessage(session, message, { onChunk, onComplete, onError } = {}) {
   try {
-    if (session.provider === 'claude') {
+    if (session.provider === 'claude-code') {
+      await _claudeCodeStreamingRequest(session, message, { onChunk, onComplete });
+    } else if (session.provider === 'claude') {
       await _claudeStreamingRequest(session, message, { onChunk, onComplete });
     } else {
       const { stream } = getGeminiModelConfig();
@@ -382,6 +429,69 @@ async function _sendMessage(session, message, { onChunk, onComplete, onError } =
     if (err instanceof Anthropic.APIUserAbortError || err.name === 'AbortError') return;
     onError?.(err);
   }
+}
+
+// ── Claude Code streaming（Agent SDK，走 Max 订阅额度）─────────
+
+async function _claudeCodeStreamingRequest(session, message, { onChunk, onComplete }) {
+  const { model, oauthToken, systemPrompt } = getClaudeCodeConfig();
+
+  const q = ccQuery({
+    prompt: message,
+    options: {
+      model,
+      systemPrompt: buildClaudeSystem(systemPrompt),  // 整体替换 Claude Code 默认的 agent 系统提示
+      ...(session.ccSessionId && { resume: session.ccSessionId }),
+      maxTurns: 1,
+      tools: [],                                      // 纯文本生成，禁用全部内置工具
+      includePartialMessages: true,                   // 开启 stream_event，拿到逐字增量
+      outputFormat: { type: 'json_schema', schema: CLAUDE_OUTPUT_FORMAT.schema },
+      abortController: session.abortController,
+      // 订阅 OAuth token 通过环境变量注入（env 会整体替换子进程环境，必须铺开 process.env）
+      ...(oauthToken && { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken } }),
+    },
+  });
+
+  let buffer = '';
+  let structured = null;
+  let resultText = null;
+  const parse = makeStreamParser(onChunk);
+
+  for await (const m of q) {
+    if (m.type === 'stream_event') {
+      const e = m.event;
+      if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta' && e.delta.text) {
+        buffer += e.delta.text;
+        parse(e.delta.text);
+      }
+    } else if (m.type === 'result') {
+      session.ccSessionId = m.session_id;
+      if (m.subtype === 'success') {
+        structured = m.structured_output ?? null;
+        resultText = m.result;
+      } else {
+        const detail = m.errors?.length ? `：${m.errors[0]}` : '';
+        throw new Error(`Claude Code 执行失败（${m.subtype}）${detail}`);
+      }
+    }
+  }
+
+  // 持久化 session id：服务重启后可从 db 恢复并 resume 追问
+  if (session.ccSessionId && session.contactId != null) {
+    try { db.setCcSessionId(session.contactId, session.ccSessionId); } catch (_) {}
+  }
+
+  // 优先用 SDK 校验过的结构化输出，退回手动解析
+  let result = structured;
+  if (!result) {
+    const raw = (resultText ?? buffer).trim();
+    try {
+      result = JSON.parse(raw);
+    } catch (e) {
+      throw new Error(`AI 返回了无效的 JSON：${e.message}`);
+    }
+  }
+  onComplete?.(result);
 }
 
 // ── Claude streaming ──────────────────────────────────────────

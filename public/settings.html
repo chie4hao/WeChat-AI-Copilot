@@ -263,6 +263,36 @@
       </div>
     </div>
 
+    <!-- Claude Code（Max 订阅） -->
+    <div class="section-title">Claude Code（Max 订阅，免 API 费，启用后优先级最高）</div>
+    <div class="settings-section">
+      <div class="setting-row">
+        <span class="setting-label">启用</span>
+        <label class="setting-toggle">
+          <input type="checkbox" id="ccEnabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">OAuth Token</span>
+        <div class="api-key-wrap">
+          <input class="setting-input" id="ccToken" type="password" placeholder="本地运行 claude setup-token 生成后粘贴">
+          <button class="toggle-visibility" id="toggleCcToken" title="显示/隐藏">&#128065;</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">模型</span>
+        <select class="setting-select" id="ccModel">
+          <option value="claude-fable-5">claude-fable-5（最强）</option>
+          <option value="claude-opus-4-8">claude-opus-4-8</option>
+          <option value="claude-sonnet-4-6">claude-sonnet-4-6（更省额度）</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div class="setting-hint">走 Claude Max 订阅额度而非 API 计费。Token 在本地电脑的 Claude Code 里运行 claude setup-token 生成（sk-ant-oat01- 开头）。额度为 5 小时滚动窗口，超限时请求会失败，稍后自动恢复。</div>
+      </div>
+    </div>
+
     <!-- Claude API -->
     <div class="section-title">Claude API（选填，填写后优先于 Gemini）</div>
     <div class="settings-section">
@@ -404,6 +434,10 @@
       myName:               $('#myName'),
       claudeApiKey:         $('#claudeApiKey'),
       toggleClaudeKey:      $('#toggleClaudeKey'),
+      ccEnabled:            $('#ccEnabled'),
+      ccToken:              $('#ccToken'),
+      toggleCcToken:        $('#toggleCcToken'),
+      ccModel:              $('#ccModel'),
       claudeModel:          $('#claudeModel'),
       claudeCandidateCount: $('#claudeCandidateCount'),
       claudeEffort:         $('#claudeEffort'),
@@ -441,6 +475,18 @@
 
     function fillForm(cfg) {
       els.myName.value         = cfg.my_name || '';
+
+      // Claude Code（Max 订阅）
+      els.ccEnabled.checked = !!cfg.claude_code?.enabled;
+      els.ccToken.value     = cfg.claude_code?.oauth_token || '';
+      const ccModelVal = cfg.claude_code?.model || 'claude-fable-5';
+      if (!els.ccModel.querySelector(`option[value="${ccModelVal}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = ccModelVal;
+        opt.textContent = ccModelVal;
+        els.ccModel.appendChild(opt);
+      }
+      els.ccModel.value = ccModelVal;
 
       // Claude
       els.claudeApiKey.value         = cfg.claude?.api_key || '';
@@ -485,6 +531,11 @@
       const claudeKey = els.claudeApiKey.value.trim();
       const cfg = {
         my_name: els.myName.value.trim(),
+        claude_code: {
+          enabled: els.ccEnabled.checked,
+          model:   els.ccModel.value,
+          ...(els.ccToken.value.trim() && { oauth_token: els.ccToken.value.trim() }),
+        },
         // 有 key 时保存完整 claude 块，无 key 时保留空块（model 偏好不丢失）
         claude: {
           ...(claudeKey && { api_key: claudeKey }),
@@ -562,6 +613,11 @@
     els.toggleClaudeKey.addEventListener('click', () => {
       const isPassword = els.claudeApiKey.type === 'password';
       els.claudeApiKey.type = isPassword ? 'text' : 'password';
+    });
+
+    els.toggleCcToken.addEventListener('click', () => {
+      const isPassword = els.ccToken.type === 'password';
+      els.ccToken.type = isPassword ? 'text' : 'password';
     });
 
     // ── Init ──────────────────────────────────────────────────────
