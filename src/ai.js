@@ -80,14 +80,20 @@ async function ensureGeminiCache(ai, model, systemInstruction) {
 
 // ── Claude helpers ────────────────────────────────────────────
 
+// base_url 指向反代（如 clewdr 的 /code 端点）时，走订阅额度而非 API 计费；
+// 反代为 Anthropic 原生格式透传，缓存/thinking/output_config 均照常生效
 function getClaudeClient() {
-  return new Anthropic({ apiKey: config.get().claude.api_key });
+  const { api_key, base_url } = config.get().claude ?? {};
+  return new Anthropic({
+    apiKey: api_key,
+    ...(base_url?.trim() && { baseURL: base_url.trim().replace(/\/+$/, '') }),
+  });
 }
 
 function getClaudeModelConfig() {
   const cfg = config.get();
-  const { model = 'claude-opus-5', candidate_count = 3, effort = 'medium' } = cfg.claude ?? {};
-  return { model, candidate_count, effort, systemPrompt: cfg.prompt ?? '' };
+  const { model = 'claude-opus-5', candidate_count = 3, effort = 'medium', base_url = '' } = cfg.claude ?? {};
+  return { model, candidate_count, effort, base_url, systemPrompt: cfg.prompt ?? '' };
 }
 
 // ── Claude Code helpers（Max 订阅，经 Agent SDK 调用，不走 API 计费）──
@@ -291,9 +297,10 @@ function buildAiPreview(chatHistory, notes = '', otherName = '对方') {
     };
   }
   if (provider === 'claude') {
-    const { model, candidate_count, systemPrompt } = getClaudeModelConfig();
+    const { model, candidate_count, systemPrompt, base_url } = getClaudeModelConfig();
     return {
-      provider, model,
+      provider: base_url ? `claude（反代：${base_url}）` : 'claude（官方 API）',
+      model,
       system: buildClaudeSystem(systemPrompt),
       user: buildUserMessage(chatHistory, candidate_count, notes, otherName),
     };

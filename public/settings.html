@@ -305,6 +305,13 @@
         </div>
       </div>
       <div class="setting-row">
+        <span class="setting-label">反代地址</span>
+        <input class="setting-input" id="claudeBaseUrl" type="text" placeholder="留空 = 官方 API。例：http://127.0.0.1:8484/code">
+      </div>
+      <div class="setting-row">
+        <div class="setting-hint">填写后请求走反代（如 clewdr），可用订阅额度替代 API 计费。注意末尾不要带 /v1，SDK 会自动追加。用 clewdr 时 API Key 填它的访问密码。</div>
+      </div>
+      <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="claudeModel">
           <option value="claude-opus-5">claude-opus-5（推荐：$5/$25，比 fable 便宜一半且更快）</option>
@@ -436,6 +443,7 @@
     const els = {
       myName:               $('#myName'),
       claudeApiKey:         $('#claudeApiKey'),
+      claudeBaseUrl:        $('#claudeBaseUrl'),
       toggleClaudeKey:      $('#toggleClaudeKey'),
       ccEnabled:            $('#ccEnabled'),
       ccToken:              $('#ccToken'),
@@ -493,6 +501,7 @@
 
       // Claude
       els.claudeApiKey.value         = cfg.claude?.api_key || '';
+      els.claudeBaseUrl.value        = cfg.claude?.base_url || '';
       els.claudeCandidateCount.value = cfg.claude?.candidate_count ?? 3;
       els.claudeEffort.value         = cfg.claude?.effort || 'medium';
       const claudeModelVal = cfg.claude?.model || 'claude-opus-5';
@@ -542,6 +551,8 @@
         // 有 key 时保存完整 claude 块，无 key 时保留空块（model 偏好不丢失）
         claude: {
           ...(claudeKey && { api_key: claudeKey }),
+          // 留空则不写入，回落官方 API
+          ...(els.claudeBaseUrl.value.trim() && { base_url: els.claudeBaseUrl.value.trim() }),
           model:           els.claudeModel.value,
           candidate_count: parseInt(els.claudeCandidateCount.value) || 3,
           effort:          els.claudeEffort.value,
