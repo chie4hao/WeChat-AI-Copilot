@@ -20,6 +20,9 @@ const sessions = new Map();
  */
 let _geminiSysCache = null; // { name, hash, expireAt }
 
+// 只在首次降级 effort 时打日志，避免每次请求刷屏
+let _warnedXhigh = false;
+
 // ── Provider detection ────────────────────────────────────────
 
 // 优先级：Claude Code（Max 订阅，免 API 费）> Claude API > Gemini
@@ -120,7 +123,19 @@ function getClaudeClient() {
 function getClaudeModelConfig() {
   const cfg = config.get();
   const { model = 'claude-opus-5', candidate_count = 3, effort = 'medium', base_url = '' } = cfg.claude ?? {};
-  return { model, candidate_count, effort, base_url, systemPrompt: cfg.prompt ?? '' };
+
+  // 反代（如 clewdr）的请求体校验只认 low/medium/high/max，传 xhigh 会被拒 422。
+  // 官方 API 支持 xhigh，所以只在走反代时降级。
+  let effectiveEffort = effort;
+  if (base_url && effort === 'xhigh') {
+    effectiveEffort = 'high';
+    if (!_warnedXhigh) {
+      console.warn('[ai] 反代不支持 effort=xhigh，本次请求已降级为 high');
+      _warnedXhigh = true;
+    }
+  }
+
+  return { model, candidate_count, effort: effectiveEffort, base_url, systemPrompt: cfg.prompt ?? '' };
 }
 
 // ── Claude Code helpers（Max 订阅，经 Agent SDK 调用，不走 API 计费）──
