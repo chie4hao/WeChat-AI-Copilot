@@ -116,6 +116,40 @@
       margin-top: 4px;
     }
 
+    /* 当前生效的 provider 状态条：优先级链有三层，直接告诉用户结论 */
+    .provider-banner {
+      background: var(--bg-panel);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 18px;
+    }
+    .provider-banner.is-api { border-left-color: #fa8c16; }
+    .provider-banner-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .provider-badge {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fff;
+    }
+    .provider-banner.is-api .provider-badge { background: #fa8c16; }
+    .provider-banner-detail {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-top: 6px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
     .setting-toggle {
       position: relative;
       width: 44px;
@@ -254,6 +288,14 @@
 
   <div class="settings-page">
 
+    <!-- 当前生效的 provider（读取服务端解析结果，不靠前端推断） -->
+    <div class="provider-banner" id="providerBanner">
+      <div class="provider-banner-top">
+        <span id="providerLabel">读取中…</span>
+      </div>
+      <div class="provider-banner-detail" id="providerDetail"></div>
+    </div>
+
     <!-- 基本信息 -->
     <div class="section-title">基本信息</div>
     <div class="settings-section">
@@ -264,7 +306,7 @@
     </div>
 
     <!-- Claude Code（Max 订阅） -->
-    <div class="section-title">Claude Code（Max 订阅，免 API 费，启用后优先级最高）</div>
+    <div class="section-title">① Claude Code（Max 订阅 SDK）— 开关打开则覆盖下面所有配置</div>
     <div class="settings-section">
       <div class="setting-row">
         <span class="setting-label">启用</span>
@@ -295,7 +337,7 @@
     </div>
 
     <!-- Claude API -->
-    <div class="section-title">Claude API（选填，填写后优先于 Gemini）</div>
+    <div class="section-title">② Claude API — ①关闭且此处有 Key 时生效（填反代地址=走订阅，留空=官方 API 计费）</div>
     <div class="settings-section">
       <div class="setting-row">
         <span class="setting-label">API Key</span>
@@ -343,7 +385,7 @@
     </div>
 
     <!-- Gemini API -->
-    <div class="section-title">Gemini API（Claude 未配置时使用）</div>
+    <div class="section-title">③ Gemini API — ①②都不满足时的兜底</div>
     <div class="settings-section">
       <div class="setting-row">
         <span class="setting-label">API Key</span>
@@ -444,6 +486,9 @@
       myName:               $('#myName'),
       claudeApiKey:         $('#claudeApiKey'),
       claudeBaseUrl:        $('#claudeBaseUrl'),
+      providerBanner:       $('#providerBanner'),
+      providerLabel:        $('#providerLabel'),
+      providerDetail:       $('#providerDetail'),
       toggleClaudeKey:      $('#toggleClaudeKey'),
       ccEnabled:            $('#ccEnabled'),
       ccToken:              $('#ccToken'),
@@ -481,6 +526,26 @@
         fillForm(cfg);
       } catch (err) {
         showToast('加载设置失败: ' + err.message);
+      }
+      loadProviderStatus();
+    }
+
+    // 由服务端解析当前生效的 provider，前端只负责展示（避免两边优先级逻辑不一致）
+    async function loadProviderStatus() {
+      try {
+        const s = await (await fetch('/api/provider-status')).json();
+        const isSub = s.billing === 'subscription';
+        els.providerBanner.classList.toggle('is-api', !isSub);
+        els.providerLabel.innerHTML =
+          `当前生效：${s.label}` +
+          `<span class="provider-badge">${isSub ? '走订阅额度' : '按量计费'}</span>`;
+        els.providerDetail.textContent =
+          `模型 ${s.model}` +
+          (s.effort ? ` · 思考深度 ${s.effort}` : '') +
+          (s.detail ? ` · ${s.detail}` : '');
+      } catch (err) {
+        els.providerLabel.textContent = '无法获取当前生效的 provider';
+        els.providerDetail.textContent = err.message;
       }
     }
 
@@ -591,6 +656,7 @@
         if (!res.ok) throw new Error('保存失败');
         originalConfig = cfg;
         showToast('已保存');
+        loadProviderStatus();   // 保存后立刻反映新的生效状态
       } catch (err) {
         showToast('保存失败: ' + err.message);
       } finally {

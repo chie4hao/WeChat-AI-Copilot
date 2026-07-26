@@ -354,6 +354,11 @@ app.get('/api/settings', (_req, res) => {
   res.json(config.get());
 });
 
+// 当前实际生效的 AI provider（设置页顶部状态条）
+app.get('/api/provider-status', (_req, res) => {
+  res.json(ai.getProviderStatus());
+});
+
 app.post('/api/settings', (req, res) => {
   // 保留前端不管的服务器字段，防止覆盖时丢失
   const current = config.get();

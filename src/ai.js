@@ -29,6 +29,33 @@ function getProvider() {
   return cfg.claude?.api_key ? 'claude' : 'gemini';
 }
 
+/**
+ * 解析当前实际生效的 provider（设置页顶部展示用）。
+ * 优先级链有三层，光看表单填了什么很难判断，这里直接算出结论。
+ */
+function getProviderStatus() {
+  const provider = getProvider();
+
+  if (provider === 'claude-code') {
+    const { model } = getClaudeCodeConfig();
+    return { provider, label: 'Claude Code（Max 订阅 · Agent SDK）', model,
+             detail: '本地 SDK 调用，走订阅额度，不产生 API 费用', billing: 'subscription' };
+  }
+
+  if (provider === 'claude') {
+    const { model, base_url, effort } = getClaudeModelConfig();
+    return base_url
+      ? { provider, label: 'Claude 反代', model, effort,
+          detail: `经 ${base_url}`, billing: 'subscription' }
+      : { provider, label: 'Claude 官方 API', model, effort,
+          detail: '直连 api.anthropic.com，按 token 计费', billing: 'api' };
+  }
+
+  const { model } = getGeminiModelConfig();
+  return { provider, label: 'Gemini', model,
+           detail: 'Claude 两项均未启用时的兜底', billing: 'api' };
+}
+
 // ── Gemini helpers ────────────────────────────────────────────
 
 function getGeminiClient() {
@@ -624,4 +651,4 @@ async function _geminiBlockingRequest(session, message, { onComplete }) {
   onComplete?.(parseAiJson(response.text));
 }
 
-export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview };
+export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview, getProviderStatus };
