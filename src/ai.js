@@ -189,6 +189,34 @@ function buildUserMessage(chatHistory, candidateCount, notes, otherName = '对�
   return `${prefix}\n${suffix}`;
 }
 
+// ── JSON 解析容错 ─────────────────────────────────────────────
+
+/**
+ * 解析 AI 返回的 JSON，逐级降级：
+ *   1. 直接 parse（output_config 生效时走这条）
+ *   2. 剥离 markdown 代码块（反代忽略 output_config 时模型常包 ```json）
+ *   3. 截取首个 { 到末个 }（模型在 JSON 前后加了说明文字）
+ */
+function parseAiJson(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) throw new Error('返回内容为空');
+
+  try { return JSON.parse(text); } catch (_) { /* 继续降级 */ }
+
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) {
+    try { return JSON.parse(fence[1].trim()); } catch (_) { /* 继续降级 */ }
+  }
+
+  const s = text.indexOf('{');
+  const e = text.lastIndexOf('}');
+  if (s !== -1 && e > s) {
+    try { return JSON.parse(text.slice(s, e + 1)); } catch (_) { /* 落到下面报错 */ }
+  }
+
+  throw new Error(`AI 返回了无效的 JSON（前 80 字符：${text.slice(0, 80)}）`);
+}
+
 // ── Streaming JSON parser（共享，提取 message 字段值实时输出）────
 
 function makeStreamParser(onChunk) {
@@ -489,15 +517,7 @@ async function _claudeCodeStreamingRequest(session, message, { onChunk, onComple
   }
 
   // 优先用 SDK 校验过的结构化输出，退回手动解析
-  let result = structured;
-  if (!result) {
-    const raw = (resultText ?? buffer).trim();
-    try {
-      result = JSON.parse(raw);
-    } catch (e) {
-      throw new Error(`AI 返回了无效的 JSON：${e.message}`);
-    }
-  }
+  const result = structured ?? parseAiJson(resultText ?? buffer);
   onComplete?.(result);
 }
 
@@ -572,11 +592,7 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
 
   session.messages.push({ role: 'assistant', content: buffer });
 
-  try {
-    onComplete?.(JSON.parse(buffer));
-  } catch (e) {
-    throw new Error(`AI 返回了无效的 JSON：${e.message}`);
-  }
+  onComplete?.(parseAiJson(buffer));
 }
 
 // ── Gemini streaming ──────────────────────────────────────────
@@ -597,11 +613,7 @@ async function _geminiStreamingRequest(session, message, { onChunk, onComplete }
     parse(text);
   }
 
-  try {
-    onComplete?.(JSON.parse(buffer));
-  } catch (e) {
-    throw new Error(`AI 返回了无效的 JSON：${e.message}`);
-  }
+  onComplete?.(parseAiJson(buffer));
 }
 
 async function _geminiBlockingRequest(session, message, { onComplete }) {
@@ -609,7 +621,7 @@ async function _geminiBlockingRequest(session, message, { onComplete }) {
     { message },
     { signal: session.abortController.signal },
   );
-  onComplete?.(JSON.parse(response.text));
+  onComplete?.(parseAiJson(response.text));
 }
 
 export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview };
