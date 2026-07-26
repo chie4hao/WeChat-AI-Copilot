@@ -13,15 +13,15 @@ gemini:
 # claude_code:
 #   enabled: true
 #   oauth_token: "sk-ant-oat01-..."
-#   model: "claude-fable-5"   # 或 claude-opus-4-8 / claude-sonnet-4-6
+#   model: "claude-opus-5"   # 或 claude-fable-5（更强但更慢）/ claude-sonnet-5（更省额度）
 #   candidate_count: 3
 
 # Claude 配置（可选）：填写后自动切换为 Claude 提供商，Gemini 配置将被忽略
-# 推荐模型：claude-opus-4-8（性能最强），claude-sonnet-4-6（更快更省）
-# 也可用 claude-fable-5（最新旗舰，$10/$50 价格是 opus 的两倍，本场景提升有限）
+# 推荐 claude-opus-5（$5/$25，本场景性价比最高）
+# claude-fable-5 最强但 $10/$50 且更慢；claude-sonnet-5（$3/$15）更快更省
 # claude:
 #   api_key: "YOUR_ANTHROPIC_API_KEY"
-#   model: "claude-opus-4-8"
+#   model: "claude-opus-5"
 #   candidate_count: 3
 #   effort: "high"   # 思考深度 low/medium/high/xhigh/max：越高思考越深、越慢越贵、质量越好；Haiku 不支持（自动忽略）
 

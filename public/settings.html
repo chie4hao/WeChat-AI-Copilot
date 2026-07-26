@@ -283,9 +283,10 @@
       <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="ccModel">
-          <option value="claude-fable-5">claude-fable-5（最强）</option>
-          <option value="claude-opus-4-8">claude-opus-4-8</option>
-          <option value="claude-sonnet-4-6">claude-sonnet-4-6（更省额度）</option>
+          <option value="claude-opus-5">claude-opus-5（推荐，更快更省额度）</option>
+          <option value="claude-fable-5">claude-fable-5（最强，较慢）</option>
+          <option value="claude-sonnet-5">claude-sonnet-5（最省额度）</option>
+          <option value="claude-opus-4-8">claude-opus-4-8（旧版）</option>
         </select>
       </div>
       <div class="setting-row">
@@ -306,11 +307,13 @@
       <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="claudeModel">
-          <option value="claude-fable-5">claude-fable-5（最新最强，价格翻倍）</option>
-          <option value="claude-opus-4-8">claude-opus-4-8（最强）</option>
-          <option value="claude-opus-4-7">claude-opus-4-7（更快，同价）</option>
-          <option value="claude-sonnet-4-6">claude-sonnet-4-6（均衡）</option>
-          <option value="claude-haiku-4-5">claude-haiku-4-5（最快）</option>
+          <option value="claude-opus-5">claude-opus-5（推荐：$5/$25，比 fable 便宜一半且更快）</option>
+          <option value="claude-fable-5">claude-fable-5（最强，$10/$50，较慢）</option>
+          <option value="claude-sonnet-5">claude-sonnet-5（$3/$15，快）</option>
+          <option value="claude-haiku-4-5">claude-haiku-4-5（最快最省，不支持思考）</option>
+          <option value="claude-opus-4-8">claude-opus-4-8（旧版）</option>
+          <option value="claude-opus-4-7">claude-opus-4-7（旧版）</option>
+          <option value="claude-sonnet-4-6">claude-sonnet-4-6（旧版）</option>
         </select>
       </div>
       <div class="setting-row">
@@ -479,7 +482,7 @@
       // Claude Code（Max 订阅）
       els.ccEnabled.checked = !!cfg.claude_code?.enabled;
       els.ccToken.value     = cfg.claude_code?.oauth_token || '';
-      const ccModelVal = cfg.claude_code?.model || 'claude-fable-5';
+      const ccModelVal = cfg.claude_code?.model || 'claude-opus-5';
       if (!els.ccModel.querySelector(`option[value="${ccModelVal}"]`)) {
         const opt = document.createElement('option');
         opt.value = ccModelVal;
@@ -492,7 +495,7 @@
       els.claudeApiKey.value         = cfg.claude?.api_key || '';
       els.claudeCandidateCount.value = cfg.claude?.candidate_count ?? 3;
       els.claudeEffort.value         = cfg.claude?.effort || 'medium';
-      const claudeModelVal = cfg.claude?.model || 'claude-opus-4-8';
+      const claudeModelVal = cfg.claude?.model || 'claude-opus-5';
       if (!els.claudeModel.querySelector(`option[value="${claudeModelVal}"]`)) {
         const opt = document.createElement('option');
         opt.value = claudeModelVal;

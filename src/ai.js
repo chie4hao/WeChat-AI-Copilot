@@ -86,7 +86,7 @@ function getClaudeClient() {
 
 function getClaudeModelConfig() {
   const cfg = config.get();
-  const { model = 'claude-opus-4-8', candidate_count = 3, effort = 'medium' } = cfg.claude ?? {};
+  const { model = 'claude-opus-5', candidate_count = 3, effort = 'medium' } = cfg.claude ?? {};
   return { model, candidate_count, effort, systemPrompt: cfg.prompt ?? '' };
 }
 
@@ -96,7 +96,7 @@ function getClaudeCodeConfig() {
   const cfg = config.get();
   const cc = cfg.claude_code ?? {};
   return {
-    model: cc.model || 'claude-fable-5',
+    model: cc.model || 'claude-opus-5',
     oauthToken: cc.oauth_token || '',
     candidate_count: cc.candidate_count ?? cfg.claude?.candidate_count ?? 3,
     systemPrompt: cfg.prompt ?? '',
