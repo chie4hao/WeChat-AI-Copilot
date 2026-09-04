@@ -149,6 +149,12 @@
       line-height: 1.6;
       word-break: break-all;
     }
+    .provider-banner-top .btn { margin-left: auto; height: 30px; padding: 0 14px; font-size: 13px; font-weight: 500; }
+    .test-ok   { color: var(--accent); }
+    .test-fail { color: #e5484d; }
+
+    /* 按接入方式显隐的行：hidden 属性要压过 display:flex */
+    .setting-row[hidden] { display: none; }
 
     .setting-toggle {
       position: relative;
@@ -292,8 +298,10 @@
     <div class="provider-banner" id="providerBanner">
       <div class="provider-banner-top">
         <span id="providerLabel">读取中…</span>
+        <button class="btn btn-secondary" id="testBtn" title="按已保存的配置发一条最小请求，确认这条通道真的能用">测试连接</button>
       </div>
       <div class="provider-banner-detail" id="providerDetail"></div>
+      <div class="provider-banner-detail" id="testResult" hidden></div>
     </div>
 
     <!-- 基本信息 -->
@@ -306,7 +314,7 @@
     </div>
 
     <!-- Claude Code（Max 订阅） -->
-    <div class="section-title">① Claude Code（Max 订阅 SDK）— 开关打开则覆盖下面所有配置</div>
+    <div class="section-title">① Claude Code（Max 订阅，Agent SDK 直连）— 开关打开则覆盖下面所有配置</div>
     <div class="settings-section">
       <div class="setting-row">
         <span class="setting-label">启用</span>
@@ -325,44 +333,57 @@
       <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="ccModel">
+          <option value="claude-fable-5-1">claude-fable-5-1（最新最强，额度消耗最高，较慢）</option>
           <option value="claude-opus-5">claude-opus-5（推荐，更快更省额度）</option>
-          <option value="claude-fable-5">claude-fable-5（最强，较慢）</option>
+          <option value="claude-fable-5">claude-fable-5（上一代 Fable）</option>
           <option value="claude-sonnet-5">claude-sonnet-5（最省额度）</option>
           <option value="claude-opus-4-8">claude-opus-4-8（旧版）</option>
         </select>
       </div>
       <div class="setting-row">
-        <div class="setting-hint">走 Claude Max 订阅额度而非 API 计费。Token 在本地电脑的 Claude Code 里运行 claude setup-token 生成（sk-ant-oat01- 开头）。额度为 5 小时滚动窗口，超限时请求会失败，稍后自动恢复。</div>
+        <div class="setting-hint">走 Claude Max 订阅额度而非 API 计费。Token 在本地电脑的 Claude Code 里运行 claude setup-token 生成（sk-ant-oat01- 开头），有效期一年。额度为 5 小时滚动窗口，超限时请求会失败，稍后自动恢复。和 ② 的 clewdr 反代用的是同一个订阅额度、同一个 token；区别是本通道没有逐字流式显示，界面会转圈直到生成完成。</div>
       </div>
     </div>
 
-    <!-- Claude API -->
-    <div class="section-title">② Claude API — ①关闭且此处有 Key 时生效（填反代地址=走订阅，留空=官方 API 计费）</div>
+    <!-- Claude：clewdr 反代 或 官方 API（同一套 config.claude 字段：有 base_url 就是反代） -->
+    <div class="section-title">② Claude — ①关闭时生效，二选一：clewdr 反代 / 官方 API</div>
     <div class="settings-section">
       <div class="setting-row">
-        <span class="setting-label">API Key</span>
+        <span class="setting-label">接入方式</span>
+        <select class="setting-select" id="claudeMode">
+          <option value="clewdr">clewdr 反代（VPS 本机，走 Claude 订阅额度）</option>
+          <option value="official">官方 API（api.anthropic.com，按 token 计费）</option>
+        </select>
+      </div>
+      <div class="setting-row" data-mode="clewdr">
+        <span class="setting-label">反代地址</span>
+        <input class="setting-input" id="claudeBaseUrl" type="text" placeholder="http://127.0.0.1:8484/code">
+      </div>
+      <div class="setting-row">
+        <span class="setting-label" id="claudeKeyLabel">反代密码</span>
         <div class="api-key-wrap">
-          <input class="setting-input" id="claudeApiKey" type="password" placeholder="输入 Anthropic API Key（留空则使用 Gemini）">
+          <input class="setting-input" id="claudeApiKey" type="password" placeholder="clewdr 配置里的 password">
           <button class="toggle-visibility" id="toggleClaudeKey" title="显示/隐藏">&#128065;</button>
         </div>
       </div>
-      <div class="setting-row">
-        <span class="setting-label">反代地址</span>
-        <input class="setting-input" id="claudeBaseUrl" type="text" placeholder="留空 = 官方 API。例：http://127.0.0.1:8484/code">
+      <div class="setting-row" data-mode="clewdr">
+        <div class="setting-hint">clewdr 跑在 VPS 本机 8484 端口，/code 路径是它的 Claude Code 通道，用的是和 ① 相同的订阅额度和 OAuth token，但支持逐字流式显示与提示词缓存。地址末尾不要带 /v1。若请求开始报 403，多半是 token 到期：先在 ① 里更新 token 并保存，再在 VPS 上重跑 restore_clewdr.sh。</div>
       </div>
-      <div class="setting-row">
-        <div class="setting-hint">填写后请求走反代（如 clewdr），可用订阅额度替代 API 计费。注意末尾不要带 /v1，SDK 会自动追加。用 clewdr 时 API Key 填它的访问密码。</div>
+      <div class="setting-row" data-mode="official">
+        <div class="setting-hint">直连 Anthropic 官方 API，按 token 计费，Key 以 sk-ant-api 开头。此处留空则回落到 ③ Gemini。</div>
       </div>
       <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="claudeModel">
-          <option value="claude-opus-5">claude-opus-5（推荐：$5/$25，比 fable 便宜一半且更快）</option>
-          <option value="claude-fable-5">claude-fable-5（最强，$10/$50，较慢）</option>
-          <option value="claude-sonnet-5">claude-sonnet-5（$3/$15，快）</option>
-          <option value="claude-haiku-4-5">claude-haiku-4-5（最快最省，不支持思考）</option>
-          <option value="claude-opus-4-8">claude-opus-4-8（旧版）</option>
-          <option value="claude-opus-4-7">claude-opus-4-7（旧版）</option>
-          <option value="claude-sonnet-4-6">claude-sonnet-4-6（旧版）</option>
+          <option value="claude-fable-5-1">claude-fable-5-1（最新最强，$10/$50，思考始终开启，较慢）</option>
+          <option value="claude-opus-5">claude-opus-5（推荐：$5/$25，更快）</option>
+          <option value="claude-fable-5">claude-fable-5（上一代 Fable，$10/$50）</option>
+          <option value="claude-sonnet-5">claude-sonnet-5（$2/$10，快）</option>
+          <option value="claude-haiku-4-5">claude-haiku-4-5（$1/$5，最快最省，不支持思考深度）</option>
+          <option value="claude-opus-4-8">claude-opus-4-8（旧版，$5/$25）</option>
+          <option value="claude-opus-4-7">claude-opus-4-7（旧版，$5/$25）</option>
+          <option value="claude-opus-4-6">claude-opus-4-6（旧版，$5/$25，无 xhigh）</option>
+          <option value="claude-sonnet-4-6">claude-sonnet-4-6（旧版，$3/$15，无 xhigh）</option>
         </select>
       </div>
       <div class="setting-row">
@@ -380,7 +401,7 @@
         </select>
       </div>
       <div class="setting-row">
-        <div class="setting-hint">控制 AI 思考深度（Opus/Fable 系列生效，Haiku 不支持会自动忽略）。越高思考越多、回复越慢、花费越高（思考算输出 token）。觉得回复太浅说明思考不足，往上调。注意：反代（clewdr）只支持 low/medium/high/max，选 xhigh 会自动降为 high。</div>
+        <div class="setting-hint">控制 AI 思考深度（Opus / Fable / Sonnet 5 生效，Haiku 不支持会自动忽略；Fable 5.1 思考始终开启，只能调深浅）。越高思考越多、回复越慢、花费越高（思考算输出 token）。觉得回复太浅说明思考不足，往上调。注意：clewdr 反代和 4.6 系列不支持 xhigh，选了会自动降为 high。</div>
       </div>
     </div>
 
@@ -484,11 +505,15 @@
 
     const els = {
       myName:               $('#myName'),
+      claudeMode:           $('#claudeMode'),
+      claudeKeyLabel:       $('#claudeKeyLabel'),
       claudeApiKey:         $('#claudeApiKey'),
       claudeBaseUrl:        $('#claudeBaseUrl'),
       providerBanner:       $('#providerBanner'),
       providerLabel:        $('#providerLabel'),
       providerDetail:       $('#providerDetail'),
+      testBtn:              $('#testBtn'),
+      testResult:           $('#testResult'),
       toggleClaudeKey:      $('#toggleClaudeKey'),
       ccEnabled:            $('#ccEnabled'),
       ccToken:              $('#ccToken'),
@@ -564,9 +589,11 @@
       }
       els.ccModel.value = ccModelVal;
 
-      // Claude
+      // Claude：有 base_url 就是 clewdr 反代，否则官方 API
       els.claudeApiKey.value         = cfg.claude?.api_key || '';
       els.claudeBaseUrl.value        = cfg.claude?.base_url || '';
+      els.claudeMode.value           = cfg.claude?.base_url ? 'clewdr' : 'official';
+      applyClaudeMode();
       els.claudeCandidateCount.value = cfg.claude?.candidate_count ?? 3;
       els.claudeEffort.value         = cfg.claude?.effort || 'medium';
       const claudeModelVal = cfg.claude?.model || 'claude-opus-5';
@@ -604,8 +631,43 @@
     }
 
     // ── Save ──────────────────────────────────────────────────────
+    // 接入方式切换：只显示当前方式相关的行，密钥框的标签随之变化
+    function applyClaudeMode() {
+      const mode = els.claudeMode.value;
+      document.querySelectorAll('[data-mode]').forEach(el => { el.hidden = el.dataset.mode !== mode; });
+      els.claudeKeyLabel.textContent = mode === 'clewdr' ? '反代密码' : 'API Key';
+      els.claudeApiKey.placeholder   = mode === 'clewdr' ? 'clewdr 配置里的 password' : 'sk-ant-api03-…';
+      if (mode === 'clewdr' && !els.claudeBaseUrl.value.trim()) els.claudeBaseUrl.value = 'http://127.0.0.1:8484/code';
+    }
+    els.claudeMode.addEventListener('change', applyClaudeMode);
+
+    // ── 测试当前生效通道（按已保存的配置发一条最小请求） ─────────────
+    els.testBtn.addEventListener('click', async () => {
+      els.testBtn.disabled = true;
+      els.testResult.hidden = false;
+      els.testResult.className = 'provider-banner-detail';
+      els.testResult.textContent = '测试中…（用的是已保存的配置，改动后请先保存）';
+      try {
+        const r = await (await fetch('/api/provider-test', { method: 'POST' })).json();
+        const sec = (r.ms / 1000).toFixed(1);
+        if (r.ok) {
+          els.testResult.className = 'provider-banner-detail test-ok';
+          els.testResult.textContent = `✅ ${r.label} 可用：${r.model}，${sec} 秒，回复「${r.reply}」`;
+        } else {
+          els.testResult.className = 'provider-banner-detail test-fail';
+          els.testResult.textContent = `❌ ${r.label || '当前通道'} 失败（${sec} 秒）：${r.error}`;
+        }
+      } catch (err) {
+        els.testResult.className = 'provider-banner-detail test-fail';
+        els.testResult.textContent = '❌ 请求失败：' + err.message;
+      } finally {
+        els.testBtn.disabled = false;
+      }
+    });
+
     async function saveSettings() {
       const claudeKey = els.claudeApiKey.value.trim();
+      const claudeMode = els.claudeMode.value;
       const cfg = {
         my_name: els.myName.value.trim(),
         claude_code: {
@@ -616,8 +678,8 @@
         // 有 key 时保存完整 claude 块，无 key 时保留空块（model 偏好不丢失）
         claude: {
           ...(claudeKey && { api_key: claudeKey }),
-          // 留空则不写入，回落官方 API
-          ...(els.claudeBaseUrl.value.trim() && { base_url: els.claudeBaseUrl.value.trim() }),
+          // clewdr 反代模式才写 base_url；官方 API 模式不写，服务端据此判断接入方式
+          ...(claudeMode === 'clewdr' && { base_url: els.claudeBaseUrl.value.trim() || 'http://127.0.0.1:8484/code' }),
           model:           els.claudeModel.value,
           candidate_count: parseInt(els.claudeCandidateCount.value) || 3,
           effort:          els.claudeEffort.value,

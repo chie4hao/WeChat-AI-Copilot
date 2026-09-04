@@ -367,6 +367,11 @@ app.get('/api/provider-status', (_req, res) => {
   res.json(ai.getProviderStatus());
 });
 
+// 设置页"测试连接"：按已保存的配置向当前生效的通道发一条最小请求
+app.post('/api/provider-test', async (_req, res) => {
+  res.json(await ai.testProvider());
+});
+
 app.post('/api/settings', (req, res) => {
   // 保留前端不管的服务器字段，防止覆盖时丢失
   const current = config.get();

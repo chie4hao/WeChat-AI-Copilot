@@ -275,6 +275,7 @@ resetSession(contactId)   // 内部用，server.js 不直接调
 | GET | `/api/push/vapid-public-key` | Web Push 公钥（未配置返回 null，前端隐藏铃铛） |
 | POST / DELETE | `/api/push/subscribe` | 保存 / 删除推送订阅 |
 | GET | `/api/provider-status` | 当前实际生效的 AI provider（设置页顶部状态条） |
+| POST | `/api/provider-test` | 按已保存配置向当前通道发一条最小请求，返回 `{ ok, label, model, ms, reply \| error }`（设置页"测试连接"按钮） |
 | GET | `/api/settings` | 读取 config.yaml（含 API Key，生产环境应限制 IP） |
 | POST | `/api/settings` | 保存 config.yaml（合并 server / claude_code 字段，不覆盖 certPath、oauth_token 等） |
 
@@ -485,6 +486,8 @@ npm run dev      # node --watch src/server.js（开发模式，文件变更自�
 - **settings 保存合并逻辑**：`POST /api/settings` 用 `Object.assign({}, current.server, incoming.server)` 合并，certPath 等不会被前端表单覆盖丢失
 - **数据库迁移**：`initSchema()` 里用 `PRAGMA table_info` 判断缺列再 ALTER，启动即迁移；改 schema 前先 `cp data.db data.db.bak`，可用 `COPILOT_DB_PATH=/tmp/copy.db node ...` 在副本上先跑一遍
 - **同步去重只认 localId**：不要再加按时间戳的唯一索引，微信时间戳只有秒级精度
+- **设置页的 Claude 接入方式**：② 区块是"clewdr 反代 / 官方 API"二选一，底层仍是同一组 `claude.*` 字段：有 `base_url` 就是反代模式（密钥框填 clewdr 的 password），没有就是官方 API。clewdr 的 `/code` 通道靠 `claude_code.oauth_token` 工作，token 到期后重跑仓库外的 restore_clewdr.sh
+- **模型列表**（2026-09）：claude-fable-5-1（最强，$10/$50，思考始终开启，禁止传 thinking disabled / budget_tokens）、claude-opus-5（默认，$5/$25）、claude-fable-5、claude-sonnet-5（$2/$10）、claude-haiku-4-5（无 effort）、4.8 / 4.7 / 4.6 旧版（4.6 与反代都没有 xhigh，代码里自动降 high）。所有 4.6+ 模型都不支持 assistant 预填，格式靠 output_config 保证
 - **better-sqlite3 Windows 安装失败**：换 `sql.js`（异步 API，需要改 db.js）
 - **WeChatFerry**：只能跑在 Windows，需要特定版本微信，有封号风险（低优先级，暂不实现）
 - **PM2 启动路径**：config.js 用 `__dirname` 定位 config.yaml，与 PM2 从哪个目录启动无关

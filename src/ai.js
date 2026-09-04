@@ -48,8 +48,8 @@ function getProviderStatus() {
   if (provider === 'claude') {
     const { model, base_url, effort } = getClaudeModelConfig();
     return base_url
-      ? { provider, label: 'Claude 反代', model, effort,
-          detail: `经 ${base_url}`, billing: 'subscription' }
+      ? { provider, label: 'clewdr 反代', model, effort,
+          detail: `经 ${base_url}，走 Claude 订阅额度`, billing: 'subscription' }
       : { provider, label: 'Claude 官方 API', model, effort,
           detail: '直连 api.anthropic.com，按 token 计费', billing: 'api' };
   }
@@ -124,13 +124,13 @@ function getClaudeModelConfig() {
   const cfg = config.get();
   const { model = 'claude-opus-5', candidate_count = 3, effort = 'medium', base_url = '' } = cfg.claude ?? {};
 
-  // 反代（如 clewdr）的请求体校验只认 low/medium/high/max，传 xhigh 会被拒 422。
-  // 官方 API 支持 xhigh，所以只在走反代时降级。
+  // 反代（如 clewdr）的请求体校验只认 low/medium/high/max，传 xhigh 会被拒 422；
+  // Opus 4.6 / Sonnet 4.6 也没有 xhigh（4.7 才加入）。官方 API 上的其余模型支持 xhigh。
   let effectiveEffort = effort;
-  if (base_url && effort === 'xhigh') {
+  if (effort === 'xhigh' && (base_url || /-4-6\b/.test(model))) {
     effectiveEffort = 'high';
     if (!_warnedXhigh) {
-      console.warn('[ai] 反代不支持 effort=xhigh，本次请求已降级为 high');
+      console.warn(`[ai] ${base_url ? '反代' : model} 不支持 effort=xhigh，已降级为 high`);
       _warnedXhigh = true;
     }
   }
@@ -383,6 +383,55 @@ function buildAiPreview(chatHistory, notes = '', otherName = '对方') {
   };
 }
 
+// ── 连通性测试（设置页"测试连接"按钮：按当前配置发一条最小请求） ──────
+
+async function testProvider() {
+  const status = getProviderStatus();
+  const t0 = Date.now();
+  const prompt = '这是一次连通性测试，只回复两个字：收到';
+  try {
+    let reply = '';
+    if (status.provider === 'claude-code') {
+      const { model, oauthToken } = getClaudeCodeConfig();
+      const abortController = new AbortController();
+      const timer = setTimeout(() => abortController.abort(), 120_000);
+      try {
+        const q = ccQuery({
+          prompt,
+          options: {
+            model, systemPrompt: '你是连通性测试助手', maxTurns: 1, tools: [], abortController,
+            ...(oauthToken && { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken } }),
+          },
+        });
+        for await (const m of q) {
+          if (m.type !== 'result') continue;
+          if (m.subtype !== 'success') {
+            throw new Error(`Claude Code 执行失败（${m.subtype}）${m.errors?.length ? '：' + m.errors[0] : ''}`);
+          }
+          reply = String(m.result ?? '');
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } else if (status.provider === 'claude') {
+      const { model } = getClaudeModelConfig();
+      // 思考 token 也算在 max_tokens 里，给足余量；effort 压到 low 让测试尽量快
+      const params = { model, max_tokens: 2048, messages: [{ role: 'user', content: prompt }] };
+      if (!/haiku/i.test(model)) params.output_config = { effort: 'low' };
+      const msg = await getClaudeClient().messages.create(params, { timeout: 90_000 });
+      if (msg.stop_reason === 'refusal') throw new Error('模型拒绝了测试请求（安全分类器）');
+      reply = msg.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    } else {
+      const { model } = getGeminiModelConfig();
+      const res = await getGeminiClient().models.generateContent({ model, contents: prompt });
+      reply = res.text ?? '';
+    }
+    return { ok: true, ...status, ms: Date.now() - t0, reply: reply.trim().slice(0, 60) };
+  } catch (err) {
+    return { ok: false, ...status, ms: Date.now() - t0, error: err.message };
+  }
+}
+
 // ── Restore session（服务重启后追问时从数据库重建内存状态） ──────
 
 async function restoreSession(contactId) {
@@ -572,7 +621,8 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
   session.messages.push({ role: 'user', content: message });
 
   // Haiku 4.5 不支持 effort / adaptive thinking；其余模型必须显式开 adaptive thinking
-  // （否则 Opus 4.8/4.7 不思考 → 回复又快又浅）。Fable 5 始终思考，传 adaptive 也安全。
+  // （否则 Opus 4.8/4.7 不思考 → 回复又快又浅）。Fable 5 / 5.1 始终思考，传 adaptive 也安全，
+  // 但绝不能传 disabled 或 budget_tokens（会 400）。
   const useThinking = !/haiku/i.test(model);
 
   // 共 2 个缓存断点（≤4 上限）：system + 首条 user 的聊天记录前缀，二者覆盖绝大部分 token。
@@ -666,4 +716,4 @@ async function _geminiBlockingRequest(session, message, { onComplete }) {
   onComplete?.(parseAiJson(response.text));
 }
 
-export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview, getProviderStatus };
+export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview, getProviderStatus, testProvider };
