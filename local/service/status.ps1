@@ -1,11 +1,14 @@
-﻿# 查看本地端运行状态：计划任务、监督进程、node 进程、最近日志
+﻿# 查看本地端运行状态：自启方式、监督进程、node 进程、最近日志
 $root = Split-Path -Parent $PSScriptRoot
 $task = 'WeChat AI Copilot Bridge'
 $pidFile = Join-Path $root 'bridge.pid'
 
-Write-Output "== 计划任务 =="
-$q = schtasks /Query /TN "$task" /FO LIST 2>$null
-if ($LASTEXITCODE -eq 0) { $q | Where-Object { $_ -match '状态|Status|下次运行|Next Run|上次运行|Last Run' } } else { Write-Output "未安装（npm run service:install）" }
+Write-Output "== 自启 =="
+$t = Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+$lnkPath = Join-Path ([Environment]::GetFolderPath('Startup')) "$task.lnk"
+if ($t) { Write-Output ("计划任务：{0}（上次结果 {1}）" -f $t.State, (Get-ScheduledTaskInfo -TaskName $task).LastTaskResult) }
+elseif (Test-Path $lnkPath) { Write-Output "启动文件夹快捷方式：$lnkPath" }
+else { Write-Output "未安装（npm run service:install）" }
 
 Write-Output "== 进程 =="
 if (Test-Path $pidFile) {
