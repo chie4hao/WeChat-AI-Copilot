@@ -1,0 +1,34 @@
+# hakurei-bot 本地端配置
+
+wcda:
+  # WeChatDataAnalysis 后端地址（保持软件开着时的端口）
+  url: "http://127.0.0.1:10393"
+  # 是否订阅 WCDA 的 SSE 变更事件（2.3.0 起可用）。开着时只在微信库有写入才去拉会话列表
+  sse: true
+  # SSE 正常时的兜底轮询间隔（毫秒），防止漏掉事件
+  heartbeat_ms: 60000
+  # SSE 不可用时的轮询间隔（毫秒）。每次轮询只拉一次会话列表（约 2.5 秒），只对有变化的联系人拉消息
+  poll_interval_ms: 5000
+  # 会话列表拉取条数（只监视最近活跃的这些会话，有新消息的会话会自动排到前面）
+  sessions_limit: 200
+  # 每次拉取的最近消息条数（上下文窗口）；离线期间新消息超过这个数会自动分页补拉
+  context_limit: 30
+
+gemini:
+  api_key: "YOUR_GEMINI_API_KEY"
+  # 用于图片描述和语音转写的模型，需支持视觉与音频
+  model: "gemini-2.5-flash"
+  # 图片描述提示词
+  image_desc_prompt: "简洁描述这张图片的内容，用于微信聊天记录分析，50字以内，不要加前缀"
+
+vps:
+  # VPS 上 hakurei-bot 服务端的地址
+  url: "https://your-vps-domain.com"
+  # 认证 token，防止未授权上报（服务端 config.yaml 的 server.sync_secret 同步配置）
+  secret: "your-secret-token"
+
+debug:
+  self_trigger: false   # true 时自己发的消息也会触发全量同步/上报流程（测试用）
+
+# 忽略群聊（只处理私聊），可改为 false
+ignore_groups: true

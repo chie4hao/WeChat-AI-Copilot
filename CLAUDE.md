@@ -29,7 +29,10 @@
 - [x] 消息管理（编辑 / 切换方向 / 删除 / "以此为止获取建议"复盘，右键或长按消息）
 - [x] 本地端实时同步 `/api/sync`（按微信 localId 去重，新消息实时推到打开的聊天窗口）
 - [x] Web Push 通知（VAPID，AI 建议生成后推送到手机，点通知直达该联系人）
-- [x] 三 provider：Claude Code（Max 订阅）/ Claude API（可走反代）/ Gemini
+- [x] 三 provider：Claude Code（Max 订阅）/ Claude API（可走反代）/ Gemini；设置页"测试连接"
+- [x] 系统状态卡：本地端心跳 `/api/bridge/heartbeat`、状态接口 `/api/status`、离线与 token 到期推送
+- [x] 本地端并入仓库 `local/`，Windows 计划任务开机自启 + 监督进程重启 + 按天日志
+- [x] 测试：`npm test`（服务端 25 项）、`npm --prefix local test`（本地端 19 项）
 - [ ] WeChatFerry 真实消息接入（已被本地端同步方案取代，不再计划）
 
 ---
@@ -38,26 +41,28 @@
 
 ```
 wechat-ai-copilot/
-├── src/
-│   ├── config.js        # 读取/写入 config.yaml（__dirname 定位，与启动目录无关）
-│   ├── db.js            # SQLite 操作，数据库文件在项目根 data.db
-│   ├── wechat.js        # Mock EventEmitter / WeChatFerry 预留接口
-│   ├── ai.js            # Gemini API 封装，含流式解析和 session 恢复
-│   └── server.js        # Express + WebSocket，所有路由和核心逻辑
+├── src/                     # VPS 服务端
+│   ├── config.js            # 读取/写入 config.yaml（COPILOT_CONFIG_PATH 可覆盖，测试用）
+│   ├── db.js                # SQLite 操作，数据库文件在项目根 data.db（COPILOT_DB_PATH 可覆盖）
+│   ├── wechat.js            # Mock EventEmitter（WeChatFerry 预留接口，未实现）
+│   ├── ai.js                # 三 provider 封装：流式 JSON 解析、缓存、session 恢复、连通性测试
+│   └── server.js            # Express + WebSocket，所有路由、同步、心跳、看门狗
 ├── public/
-│   ├── index.html       # 主界面（三栏布局，移动端响应式）
-│   ├── app.js           # 前端逻辑
-│   ├── style.css        # 全局样式（CSS 变量，移动优先）
-│   ├── settings.html    # 设置页面（含所有 config.yaml 字段）
-│   ├── import.html      # 聊天记录导入页（解析微信格式 + 批量写库）
-│   ├── manifest.json    # PWA manifest（含 share_target 声明）
-│   ├── sw.js            # Service Worker（拦截 Share Target POST，存 IndexedDB）
-│   ├── icon-192.png     # PWA 图标
-│   └── icon-512.png     # PWA 图标
-├── config.yaml          # 用户配置（gitignored，含 API Key）
-├── config.yaml.example  # 配置模板
-├── package.json         # type: "module"（ESM），Node ≥ 18
-└── data.db              # SQLite 数据库文件（gitignored，运行时自动创建）
+│   ├── index.html / app.js  # 主界面（三栏布局，移动端响应式，含系统状态卡）
+│   ├── style.css            # 全局样式（CSS 变量，移动优先）
+│   ├── settings.html        # 设置页面（AI 通道、模型、测试连接、服务器、名单、prompt）
+│   ├── import.html          # 聊天记录导入页；解析器在 wechat-log-parser.js（与测试共用）
+│   ├── manifest.json / sw.js# PWA：Share Target、Web Push
+│   └── icon-*.png / badge-96.png
+├── local/                   # 本地端（Windows），有自己的 package.json / CLAUDE.md / 测试
+│   ├── src/                 # index.js 入口、wechat_bridge.js 监听、sync_client.js 上报、image_analyzer.js
+│   ├── service/             # 开机自启：计划任务 + 监督进程（PowerShell / VBS）
+│   └── test/
+├── test/                    # 服务端测试（node --test）
+├── tools/                   # deploy_vps.sh / update_vps.sh / restore_clewdr.sh
+├── config.yaml              # 用户配置（gitignored，含 API Key）
+├── config.yaml.example      # 配置模板
+└── data.db                  # SQLite（gitignored，运行时自动创建）
 ```
 
 **所有源文件均为 ESM（`import/export`），绝对不能用 `require()`。**
@@ -357,16 +362,16 @@ wechat.receive() 或 Mock 注入
 
 **微信聊天记录的实际格式（多选消息 → 分享）：**
 ```
-wyongwei 和 古希腊掌管希腊奶的神 在微信上的聊天记录如下，请查收。
+小明 和 小红 在微信上的聊天记录如下，请查收。
 
 —————  2026-04-06  —————
 
 
-古希腊掌管希腊奶的神  16:21
+小红  16:21
 
 有点事，一会儿回
 
-wyongwei  16:21
+小明  16:21
 
 好的
 ```
@@ -377,7 +382,7 @@ wyongwei  16:21
 - 发送者行：`发送者名  HH:MM`（两个以上空格分隔，时间在末尾）
 - 消息内容：发送者行的下一个非空行
 
-**解析器**：`parseWeChatLog()` 在 import.html 内，正则 `TIME_RE = /\s{2,}(\d{1,2}:\d{2})\s*$/` 匹配发送者行。
+**解析器**：`parseWeChatLog()` 在 `public/wechat-log-parser.js`（ESM，import.html 用 `<script type="module">` 引入，测试直接 import），正则 `TIME_RE = /\s{2,}(\d{1,2}:\d{2})\s*$/` 匹配发送者行。
 
 **自动识别"我"**：页面加载时调 `/api/settings` 获取 `my_name`，在 `parsed.names` 中查找匹配，匹配成功则跳过手动选择直接预览。
 
@@ -476,6 +481,21 @@ npm run dev      # node --watch src/server.js（开发模式，文件变更自�
 - PWA 安装后卸载重装才能更新 Share Target 注册
 
 ---
+
+## 系统状态卡（/api/status）
+
+- 本地端每 `vps.heartbeat_ms`（默认 60s）POST `/api/bridge/heartbeat`（X-Secret 同 sync），内容是 `bridge.getStatus()`：sseConnected / wcdaReachable / wcdaRealtime / lastPollOkAt / lastEventAt / sessions / pending 队列 / 版本 / 主机名。服务端存进 `kv` 表（key `bridge_heartbeat`），重启后仍能显示"上次见到是什么时候"。
+- `GET /api/status` 汇总：bridge（含 stale = 超过 `bridge_offline_minutes` 没心跳）、sync（最近同步消息时间、24 小时内条数）、ai（当前通道 + 最近一次生成结果 `ai_last_run` + 上次成功时间）、token（`claude_code.token_created_at` + 365 天算到期，剩 14 天内 warn）。
+- 看门狗每分钟跑一次：心跳超时且未提醒过 → 推送"本地端离线"并记 `bridge_alerted`；心跳恢复时推送"已恢复"；token 临近到期每天最多推一次。推送 tag 分别为 bridge / token，不会覆盖 AI 建议通知。
+- 前端 `loadStatus()`：启动时、每 60s、收到 WS `status_update` 时刷新；红 = 链路断 / AI 刚失败，黄 = 需留意，绿 = 正常。
+
+## 测试
+
+```
+npm test                 # test/*.test.js：db 迁移与去重、ai 辅助函数（含时区）、导入解析、HTTP 端到端
+npm --prefix local test  # local/test：消息转换、会话指纹与增量判定、上报与重试队列
+```
+用 Node 自带 `node --test`，每个文件独立进程；`test/helpers.js` 用 `COPILOT_DB_PATH` / `COPILOT_CONFIG_PATH` 指向临时目录，本地端用 `HAKUREI_DATA_DIR`。server.js 导出 `{ app, server, wss }`，端到端测试把它起在随机端口上。
 
 ## 注意事项 & 常见坑
 

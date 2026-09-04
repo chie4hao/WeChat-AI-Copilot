@@ -11,7 +11,7 @@ self.addEventListener('push', (e) => {
     body:      data.body || 'AI 建议已生成',
     icon:      '/icon-192.png',
     badge:     '/badge-96.png',
-    tag:       'ai-suggestion',   // 同 tag 的通知会覆盖，不堆叠
+    tag:       data.tag || 'ai-suggestion',   // 同 tag 的通知会覆盖，不堆叠；本地端离线、token 到期各用各的 tag
     renotify:  true,
     data:      { contactId: data.contactId },
   }));

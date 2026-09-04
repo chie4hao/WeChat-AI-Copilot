@@ -1,0 +1,25 @@
+{
+  "name": "wechat-ai-copilot-local",
+  "version": "0.2.0",
+  "description": "WeChat AI Copilot 本地端：监听 WeChatDataAnalysis 的实时消息，上报到 VPS",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "service:install": "powershell -NoProfile -ExecutionPolicy Bypass -File service/install_service.ps1",
+    "service:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File service/uninstall_service.ps1",
+    "service:start": "powershell -NoProfile -ExecutionPolicy Bypass -File service/start_bridge.ps1",
+    "service:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File service/stop_bridge.ps1",
+    "service:status": "powershell -NoProfile -ExecutionPolicy Bypass -File service/status.ps1"
+  },
+  "dependencies": {
+    "@google/genai": "^0.7.0",
+    "js-yaml": "^4.1.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

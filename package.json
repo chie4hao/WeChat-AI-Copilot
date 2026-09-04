@@ -1,12 +1,14 @@
 {
   "name": "wechat-ai-copilot",
-  "version": "0.1.0",
-  "description": "AI reply assistant for WeChat - suggests replies, human reviews and sends",
+  "version": "0.2.0",
+  "description": "微信 AI 回复助手：本地端读取微信消息同步到 VPS，AI 给出分析与候选回复，人工审核后手动发送",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:all": "node --test \"test/**/*.test.js\" && npm --prefix local test"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.260",
@@ -19,6 +21,19 @@
     "ws": "^8.16.0"
   },
   "engines": {
-    "node": ">=18.0.0"
-  }
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chie4hao/WeChat-AI-Copilot.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "wechat",
+    "ai",
+    "claude",
+    "gemini",
+    "reply-assistant",
+    "pwa"
+  ]
 }

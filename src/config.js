@@ -4,7 +4,8 @@ import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.join(__dirname, '..', 'config.yaml');
+// COPILOT_CONFIG_PATH 供测试指向临时配置，平时不设
+const CONFIG_PATH = process.env.COPILOT_CONFIG_PATH || path.join(__dirname, '..', 'config.yaml');
 
 let _config = null;
 

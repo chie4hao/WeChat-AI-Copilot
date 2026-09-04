@@ -96,21 +96,64 @@ function initSchema() {
   try {
     db.exec('ALTER TABLE ai_sessions ADD COLUMN cc_session_id TEXT');
   } catch (_) { /* 列已存在 */ }
+
+  // 小型键值表：本地端心跳、最近一次 AI 结果等运行状态，重启后仍能显示"上次见到是什么时候"
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kv (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+}
+
+// ── KV（运行状态） ─────────────────────────────────────────────
+
+function kvGet(key) {
+  const row = getDb().prepare('SELECT value, updated_at FROM kv WHERE key = ?').get(key);
+  if (!row) return null;
+  try { return { value: JSON.parse(row.value), updatedAt: row.updated_at }; } catch { return null; }
+}
+
+function kvSet(key, value) {
+  getDb().prepare(`
+    INSERT INTO kv (key, value, updated_at) VALUES (@key, @value, @updatedAt)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run({ key, value: JSON.stringify(value), updatedAt: Date.now() });
+}
+
+// 最近一次 AI 成功生成的时间（ai_round 的 created_at）
+function getLastAiSuccessAt() {
+  return getDb().prepare("SELECT MAX(created_at) t FROM ai_messages WHERE type = 'ai_round'").get()?.t ?? null;
+}
+
+// 最近一条同步进来的消息时间 & sinceMs 以来入库条数（只算本地端同步的，按微信时间戳）
+function getSyncStats(sinceMs) {
+  const db = getDb();
+  const last = db.prepare('SELECT MAX(timestamp) t FROM messages WHERE local_id IS NOT NULL OR wechat_create_time IS NOT NULL').get()?.t ?? null;
+  const count = db.prepare('SELECT COUNT(*) c FROM messages WHERE (local_id IS NOT NULL OR wechat_create_time IS NOT NULL) AND timestamp >= ?').get(sinceMs)?.c ?? 0;
+  return { lastMessageAt: last, insertedSince: count };
 }
 
 // ── Contacts ─────────────────────────────────────────────────
 
+// 新建时 last_time 留空：由第一条消息（哪怕是同步来的旧消息）来填，否则同步历史时预览永远填不上
 function upsertContact({ wxid, name, avatar }) {
   const db = getDb();
   db.prepare(`
-    INSERT INTO contacts (wxid, name, avatar, last_time)
-    VALUES (@wxid, @name, @avatar, @last_time)
+    INSERT INTO contacts (wxid, name, avatar)
+    VALUES (@wxid, @name, @avatar)
     ON CONFLICT(wxid) DO UPDATE SET
       name   = CASE WHEN name_manual = 1 THEN name ELSE excluded.name END,
       avatar = COALESCE(excluded.avatar, avatar)
-  `).run({ wxid, name, avatar: avatar || null, last_time: Date.now() });
+  `).run({ wxid, name, avatar: avatar || null });
 
   return db.prepare('SELECT * FROM contacts WHERE wxid = ?').get(wxid);
+}
+
+// 手动新建的联系人没有消息，把它顶到列表最上面
+function touchContact(contactId) {
+  getDb().prepare('UPDATE contacts SET last_time = ? WHERE id = ?').run(Date.now(), contactId);
 }
 
 function getContacts() {
@@ -365,6 +408,7 @@ function getAllPushSubscriptions() {
 export {
   getDb,
   upsertContact,
+  touchContact,
   getContacts,
   getContactByWxid,
   getContactById,
@@ -389,4 +433,8 @@ export {
   savePushSubscription,
   removePushSubscription,
   getAllPushSubscriptions,
+  kvGet,
+  kvSet,
+  getLastAiSuccessAt,
+  getSyncStats,
 };

@@ -773,3 +773,36 @@ body {
 ::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+
+/* ── 系统状态卡（联系人栏顶部） ─────────────────────────────── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-sub);
+  cursor: pointer;
+  text-align: left;
+}
+.status-bar:hover { background: #f7f7f7; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #bbb; flex-shrink: 0; }
+.status-bar.ok   .status-dot { background: var(--accent); }
+.status-bar.warn .status-dot { background: #fa8c16; }
+.status-bar.bad  .status-dot { background: var(--badge-red); }
+.status-bar.warn .status-text { color: #d46b08; }
+.status-bar.bad  .status-text { color: var(--badge-red); }
+.status-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.status-detail { font-size: 13px; line-height: 1.7; max-height: 60vh; overflow: auto; }
+.status-detail .row { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.status-detail .row:last-child { border-bottom: none; }
+.status-detail .k { color: var(--text-sub); min-width: 96px; flex-shrink: 0; }
+.status-detail .v { flex: 1; word-break: break-all; }
+.status-detail .v.bad  { color: var(--badge-red); }
+.status-detail .v.warn { color: #d46b08; }

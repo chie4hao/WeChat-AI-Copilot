@@ -13,6 +13,12 @@ import * as db from './db.js';
 // 本地端上报的 secret（从 config.yaml 读取）
 const syncSecret = config.get().server?.sync_secret ?? '';
 
+// ── 运行状态（主页状态卡 + 离线提醒） ───────────────────────────
+// 本地端超过这么多分钟没有心跳就视为离线，推送提醒一次；恢复时再推一次
+const BRIDGE_OFFLINE_MIN = Number(config.get().bridge_offline_minutes) || 10;
+let lastAi = db.kvGet('ai_last_run')?.value ?? null;          // { at, ok, contactName, ms, error }
+let bridgeAlerted = !!(db.kvGet('bridge_alerted')?.value);     // 已为当前这次离线推送过提醒
+
 // ── Web Push VAPID 初始化 ─────────────────────────────────────
 const vapidPublicKey  = config.get().server?.vapid_public_key ?? '';
 const vapidPrivateKey = config.get().server?.vapid_private_key ?? '';
@@ -172,8 +178,9 @@ app.post('/api/contacts', (req, res) => {
   if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
   const wxid = `manual_${Date.now()}`;
   const contact = db.upsertContact({ wxid, name: name.trim(), avatar: null });
+  db.touchContact(contact.id);
   broadcast({ type: 'contacts_update' });
-  res.json(contact);
+  res.json(db.getContactById(contact.id));
 });
 
 // 修改联系人名称
@@ -335,6 +342,88 @@ app.post('/api/sync', (req, res) => {
   }
 });
 
+// ── API: 本地端心跳 & 系统状态 ───────────────────────────────
+
+app.post('/api/bridge/heartbeat', (req, res) => {
+  if (syncSecret && req.headers['x-secret'] !== syncSecret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const hb = { ...(req.body ?? {}), receivedAt: Date.now() };
+  db.kvSet('bridge_heartbeat', hb);
+  if (bridgeAlerted) {
+    bridgeAlerted = false;
+    db.kvSet('bridge_alerted', false);
+    console.log('[watchdog] 本地端心跳已恢复');
+    sendPush({ title: '本地端已恢复', body: `${hb.host || '本地端'} 重新开始上报心跳`, tag: 'bridge' });
+  }
+  broadcast({ type: 'status_update' });
+  res.json({ ok: true, serverTime: Date.now() });
+});
+
+function buildStatus() {
+  const now = Date.now();
+  const hb = db.kvGet('bridge_heartbeat')?.value ?? null;
+  const lastSeenAt = hb?.receivedAt ?? null;
+  const staleMs = lastSeenAt ? now - lastSeenAt : null;
+  const stale = lastSeenAt == null || staleMs > BRIDGE_OFFLINE_MIN * 60_000;
+
+  const provider = ai.getProviderStatus();
+  const cfg = config.get();
+  // Claude Code 直连和 clewdr 反代都靠 claude_code.oauth_token（有效期一年）
+  const usesOauth = provider.provider === 'claude-code' || (provider.provider === 'claude' && !!cfg.claude?.base_url);
+  const createdStr = cfg.claude_code?.token_created_at ? String(cfg.claude_code.token_created_at).slice(0, 10) : null;
+  const createdAt = createdStr ? Date.parse(createdStr) : NaN;
+  const expiresAt = Number.isFinite(createdAt) ? createdAt + 365 * 86_400_000 : null;
+  const daysLeft = expiresAt ? Math.floor((expiresAt - now) / 86_400_000) : null;
+
+  return {
+    now,
+    bridge: {
+      lastSeenAt, stale,
+      staleMinutes: staleMs != null ? Math.floor(staleMs / 60_000) : null,
+      offlineThresholdMinutes: BRIDGE_OFFLINE_MIN,
+      ...(hb ?? {}),
+    },
+    sync: db.getSyncStats(now - 86_400_000),
+    ai: { ...provider, lastRun: lastAi, lastSuccessAt: db.getLastAiSuccessAt() },
+    token: { relevant: usesOauth, createdAt: createdStr, expiresAt, daysLeft, warn: daysLeft != null && daysLeft <= 14 },
+  };
+}
+
+app.get('/api/status', (_req, res) => {
+  res.json(buildStatus());
+});
+
+function recordAiRun(entry) {
+  lastAi = { at: Date.now(), ...entry };
+  db.kvSet('ai_last_run', lastAi);
+  broadcast({ type: 'status_update' });
+}
+
+// 每分钟检查一次：本地端心跳超时 → 推送提醒；token 临近到期 → 每天最多提醒一次
+const watchdog = setInterval(() => {
+  try {
+    const s = buildStatus();
+    if (s.bridge.lastSeenAt && s.bridge.stale && !bridgeAlerted) {
+      bridgeAlerted = true;
+      db.kvSet('bridge_alerted', true);
+      console.warn(`[watchdog] 本地端已 ${s.bridge.staleMinutes} 分钟没有心跳`);
+      sendPush({ title: '本地端离线', body: `已 ${s.bridge.staleMinutes} 分钟没有收到心跳，微信新消息不会同步`, tag: 'bridge' });
+      broadcast({ type: 'status_update' });
+    }
+    if (s.token.relevant && s.token.warn) {
+      const warnedAt = db.kvGet('token_warned_at')?.value ?? 0;
+      if (Date.now() - warnedAt > 86_400_000) {
+        db.kvSet('token_warned_at', Date.now());
+        sendPush({ title: 'Claude OAuth token 即将到期', body: `预计 ${s.token.daysLeft} 天后到期，请重新运行 claude setup-token 并更新设置`, tag: 'token' });
+      }
+    }
+  } catch (err) {
+    console.error('[watchdog]', err.message);
+  }
+}, 60_000);
+watchdog.unref();
+
 // ── API: Push Subscription ────────────────────────────────────
 
 app.get('/api/push/vapid-public-key', (_req, res) => {
@@ -383,6 +472,11 @@ app.post('/api/settings', (req, res) => {
   if (current.claude_code) {
     incoming.claude_code = Object.assign({}, current.claude_code, incoming.claude_code);
   }
+  // 换了新 token 且没手填生成日期时，自动记为今天（用于一年后的到期提醒）
+  const newToken = incoming.claude_code?.oauth_token;
+  if (newToken && newToken !== current.claude_code?.oauth_token && !req.body?.claude_code?.token_created_at) {
+    incoming.claude_code.token_created_at = new Date().toISOString().slice(0, 10);
+  }
   config.save(incoming);
   res.json({ ok: true });
 });
@@ -421,16 +515,13 @@ wechat.on('message', (msg) => {
   }
 });
 
-async function sendPushNotifications(contactId, contactName, firstCandidate) {
+// 通用推送：tag 相同的通知会互相覆盖（AI 建议、本地端离线、token 到期各用各的 tag）
+async function sendPush({ title, body, contactId = null, tag = 'ai-suggestion' }) {
   if (!vapidPublicKey || !vapidPrivateKey) return;
   const subscriptions = db.getAllPushSubscriptions();
   if (!subscriptions.length) return;
 
-  const payload = JSON.stringify({
-    title: `${contactName} — AI 建议`,
-    body: firstCandidate ? firstCandidate.slice(0, 100) : 'AI 建议已生成',
-    contactId,
-  });
+  const payload = JSON.stringify({ title, body, contactId, tag });
 
   for (const sub of subscriptions) {
     try {
@@ -447,6 +538,14 @@ async function sendPushNotifications(contactId, contactName, firstCandidate) {
       }
     }
   }
+}
+
+function sendPushNotifications(contactId, contactName, firstCandidate) {
+  return sendPush({
+    title: `${contactName} — AI 建议`,
+    body: firstCandidate ? firstCandidate.slice(0, 100) : 'AI 建议已生成',
+    contactId,
+  });
 }
 
 // force=true 时无视名单强制触发（手动点"获取建议"），收到消息自动触发时 force=false
@@ -474,6 +573,7 @@ async function triggerAi(contact, { force = false, chatHistory = null } = {}) {
 
   const history = chatHistory ?? db.getRecentMessages(contact.id);
   const session = db.resetAiSession(contact.id);
+  const t0 = Date.now();
 
   broadcast({ type: 'ai_start', contactId: contact.id, fresh: true });
 
@@ -489,16 +589,19 @@ async function triggerAi(contact, { force = false, chatHistory = null } = {}) {
         db.setPendingSuggestion(contact.id, true);
         broadcast({ type: 'ai_complete', contactId: contact.id, result });
         broadcast({ type: 'contacts_update' });
+        recordAiRun({ ok: true, contactName: contact.name, ms: Date.now() - t0 });
         sendPushNotifications(contact.id, contact.name, result.candidates?.[0]);
       },
       onError: (err) => {
         console.error('[triggerAi] AI error:', err.message);
         broadcast({ type: 'ai_error', contactId: contact.id, error: err.message });
+        recordAiRun({ ok: false, contactName: contact.name, ms: Date.now() - t0, error: err.message });
       },
     }, contact.notes || '', contact.name);
   } catch (err) {
     console.error('[triggerAi] 未捕获异常:', err);
     broadcast({ type: 'ai_error', contactId: contact.id, error: err.message });
+    recordAiRun({ ok: false, contactName: contact.name, ms: Date.now() - t0, error: err.message });
   }
 }
 
@@ -507,6 +610,9 @@ async function triggerAi(contact, { force = false, chatHistory = null } = {}) {
 const PORT = config.get().server?.port ?? 3000;
 server.listen(PORT, () => {
   const proto = isHttps ? 'https' : 'http';
-  console.log(`[server] 已启动：${proto}://localhost:${PORT}`);
+  console.log(`[server] 已启动：${proto}://localhost:${server.address().port}`);
   wechat.start();
 });
+
+// 供测试直接挂载（node --test）
+export { app, server, wss };

@@ -31,6 +31,11 @@
         <input class="search-input" id="searchInput" type="search" placeholder="搜索联系人…">
         <button class="add-contact-btn" id="addContactBtn" title="新建联系人">＋</button>
       </div>
+      <!-- 系统状态卡：本地端心跳 / WCDA / SSE / AI 通道，点开看详情 -->
+      <button class="status-bar" id="statusBar" type="button" title="系统状态，点击查看详情">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">状态读取中…</span>
+      </button>
       <ul class="contact-list" id="contactList">
         <li class="list-empty">暂无联系人</li>
       </ul>
@@ -148,6 +153,18 @@
       <div class="modal-actions">
         <button class="modal-btn modal-cancel" id="confirmCancel">取消</button>
         <button class="modal-btn modal-danger" id="confirmOk">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 系统状态详情 -->
+  <div class="modal-mask" id="statusMask" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-title">系统状态</div>
+      <div class="status-detail" id="statusDetail"></div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-cancel" id="statusClose">关闭</button>
+        <button class="modal-btn modal-confirm" id="statusRefresh">刷新</button>
       </div>
     </div>
   </div>

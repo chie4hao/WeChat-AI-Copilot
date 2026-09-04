@@ -331,6 +331,11 @@
         </div>
       </div>
       <div class="setting-row">
+        <span class="setting-label">Token 生成日期</span>
+        <input class="setting-input" id="ccTokenDate" type="date" style="width:170px;flex:none">
+        <span class="setting-hint" style="margin:0">有效期一年，用于主页状态卡的到期提醒；换新 token 时自动记为当天</span>
+      </div>
+      <div class="setting-row">
         <span class="setting-label">模型</span>
         <select class="setting-select" id="ccModel">
           <option value="claude-fable-5-1">claude-fable-5-1（最新最强，额度消耗最高，较慢）</option>
@@ -517,6 +522,7 @@
       toggleClaudeKey:      $('#toggleClaudeKey'),
       ccEnabled:            $('#ccEnabled'),
       ccToken:              $('#ccToken'),
+      ccTokenDate:          $('#ccTokenDate'),
       toggleCcToken:        $('#toggleCcToken'),
       ccModel:              $('#ccModel'),
       claudeModel:          $('#claudeModel'),
@@ -580,6 +586,7 @@
       // Claude Code（Max 订阅）
       els.ccEnabled.checked = !!cfg.claude_code?.enabled;
       els.ccToken.value     = cfg.claude_code?.oauth_token || '';
+      els.ccTokenDate.value = (cfg.claude_code?.token_created_at || '').slice(0, 10);
       const ccModelVal = cfg.claude_code?.model || 'claude-opus-5';
       if (!els.ccModel.querySelector(`option[value="${ccModelVal}"]`)) {
         const opt = document.createElement('option');
@@ -674,6 +681,7 @@
           enabled: els.ccEnabled.checked,
           model:   els.ccModel.value,
           ...(els.ccToken.value.trim() && { oauth_token: els.ccToken.value.trim() }),
+          ...(els.ccTokenDate.value && { token_created_at: els.ccTokenDate.value }),
         },
         // 有 key 时保存完整 claude 块，无 key 时保留空块（model 偏好不丢失）
         claude: {

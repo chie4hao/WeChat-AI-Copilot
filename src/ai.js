@@ -189,27 +189,44 @@ function buildClaudeUserContent(chatHistory, candidateCount, notes, otherName = 
 
 // ── Shared message formatting ─────────────────────────────────
 
-function formatMsgTime(ts) {
-  // getHours() 受 VPS 时区影响；手动偏移到 UTC+8 再用 UTC getter，结果与时区无关
-  const d = new Date(ts + 8 * 3600 * 1000);
-  const mo = d.getUTCMonth() + 1;
-  const day = d.getUTCDate();
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${mo}月${day}日 ${hh}:${mm}`;
+// 时间统一按 config.timezone（IANA 时区名，默认 Asia/Shanghai）显示，与 VPS 所在时区无关
+const WEEKDAYS = { Sun: '周日', Mon: '周一', Tue: '周二', Wed: '周三', Thu: '周四', Fri: '周五', Sat: '周六' };
+let _tzFmt = null;
+let _tzFmtZone = '';
+
+function tzFormatter() {
+  const zone = String(config.get().timezone || 'Asia/Shanghai');
+  if (_tzFmtZone === zone && _tzFmt) return _tzFmt;
+  const opts = { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short' };
+  try {
+    _tzFmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, ...opts });
+  } catch (_) {
+    console.warn(`[ai] 无效的时区 "${zone}"，回退到 Asia/Shanghai`);
+    _tzFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', ...opts });
+  }
+  _tzFmtZone = zone;
+  return _tzFmt;
 }
 
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function tzParts(ts) {
+  const p = {};
+  for (const { type, value } of tzFormatter().formatToParts(new Date(ts))) p[type] = value;
+  return {
+    year: p.year, month: Number(p.month), day: Number(p.day),
+    hh: String(p.hour).padStart(2, '0'), mm: String(p.minute).padStart(2, '0'),
+    weekday: WEEKDAYS[p.weekday] ?? '',
+  };
+}
 
-// 当前时间（UTC+8，含年份和星期），让 AI 判断距上一条消息隔了多久、是否该开新话题
+function formatMsgTime(ts) {
+  const t = tzParts(ts);
+  return `${t.month}月${t.day}日 ${t.hh}:${t.mm}`;
+}
+
+// 当前时间（含年份和星期），让 AI 判断距上一条消息隔了多久、是否该开新话题
 function formatNow() {
-  const d = new Date(Date.now() + 8 * 3600 * 1000);
-  const yr = d.getUTCFullYear();
-  const mo = d.getUTCMonth() + 1;
-  const day = d.getUTCDate();
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${yr}年${mo}月${day}日 ${WEEKDAYS[d.getUTCDay()]} ${hh}:${mm}`;
+  const t = tzParts(Date.now());
+  return `${t.year}年${t.month}月${t.day}日 ${t.weekday} ${t.hh}:${t.mm}`;
 }
 
 // 拆成 prefix（稳定可缓存：notes + 聊天记录）和 suffix（易变不缓存：当前时间 + 指令）。
@@ -261,6 +278,8 @@ function parseAiJson(raw) {
 
 // ── Streaming JSON parser（共享，提取 message 字段值实时输出）────
 
+const JSON_ESCAPES = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', '"': '"', '\\': '\\', '/': '/' };
+
 function makeStreamParser(onChunk) {
   let msgStarted = false;
   let msgDone = false;
@@ -280,16 +299,26 @@ function makeStreamParser(onChunk) {
     let out = '';
     let i = 0;
     while (i < pending.length) {
-      if (pending[i] === '\\' && i + 1 < pending.length) {
+      const ch = pending[i];
+      if (ch === '\\') {
+        if (i + 1 >= pending.length) break;   // 转义符正好被切在块尾，等下一块再解
         const esc = pending[i + 1];
-        out += esc === 'n' ? '\n' : esc === 't' ? '\t' : esc;
-        i += 2;
-      } else if (pending[i] === '"') {
+        if (esc === 'u') {
+          if (i + 6 > pending.length) break;  // \uXXXX 不完整，等下一块
+          const code = parseInt(pending.slice(i + 2, i + 6), 16);
+          out += Number.isNaN(code) ? pending.slice(i, i + 6) : String.fromCharCode(code);
+          i += 6;
+        } else {
+          out += JSON_ESCAPES[esc] ?? esc;
+          i += 2;
+        }
+      } else if (ch === '"') {
         msgDone = true;
         i++;
         break;
       } else {
-        out += pending[i++];
+        out += ch;
+        i++;
       }
     }
     pending = pending.slice(i);
@@ -716,4 +745,8 @@ async function _geminiBlockingRequest(session, message, { onComplete }) {
   onComplete?.(parseAiJson(response.text));
 }
 
-export { generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview, getProviderStatus, testProvider };
+export {
+  generateSuggestions, followUp, cancelRequest, resetSession, buildAiPreview, getProviderStatus, testProvider,
+  // 纯函数，供测试
+  parseAiJson, makeStreamParser, buildUserMessageParts, buildUserMessage, formatMsgTime, formatNow,
+};

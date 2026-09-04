@@ -1,0 +1,7 @@
+node_modules/
+config.yaml
+sync_state.json
+image_cache.json
+pending_queue.json
+logs/
+bridge.pid

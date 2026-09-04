@@ -13,12 +13,13 @@ gemini:
 # claude_code:
 #   enabled: true
 #   oauth_token: "sk-ant-oat01-..."
-#   model: "claude-opus-5"   # 或 claude-fable-5（更强但更慢）/ claude-sonnet-5（更省额度）
+#   model: "claude-opus-5"   # 或 claude-fable-5-1（最强但更慢、额度消耗高）/ claude-sonnet-5（更省额度）
+#   token_created_at: "2026-01-01"   # token 生成日期，用于一年后的到期提醒（换 token 时自动更新）
 #   candidate_count: 3
 
 # Claude 配置（可选）：填写后自动切换为 Claude 提供商，Gemini 配置将被忽略
 # 推荐 claude-opus-5（$5/$25，本场景性价比最高）
-# claude-fable-5 最强但 $10/$50 且更慢；claude-sonnet-5（$3/$15）更快更省
+# claude-fable-5-1 最强但 $10/$50 且更慢；claude-sonnet-5（$2/$10）更快更省
 # base_url 填反代地址时走订阅额度而非 API 计费（如 clewdr 的 /code 端点，Anthropic 原生格式
 # 透传，缓存/thinking/结构化输出照常生效）。末尾不要带 /v1，SDK 会自动追加；
 # 用 clewdr 时 api_key 填它的访问密码
@@ -72,3 +73,9 @@ prompt: |
   - 候选回复语气像正常人发消息，自然真实
   - 绝对不能油腻、不能堆感叹号
   - 如果当前对话不需要回复，直接说明原因和建议
+
+# 拼给 AI 的消息时间与"当前时间"所用的时区（IANA 名称），与 VPS 所在时区无关
+timezone: "Asia/Shanghai"
+
+# 本地端超过这么多分钟没有心跳，主页状态卡标红并推送一次提醒
+bridge_offline_minutes: 10

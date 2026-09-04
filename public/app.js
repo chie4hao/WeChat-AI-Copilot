@@ -429,6 +429,9 @@ function handleWsEvent(evt) {
     case 'contacts_update':
       loadContacts();
       break;
+    case 'status_update':
+      loadStatus();
+      break;
     case 'messages_reload':
       // 本地端一次同步了大批消息（全量补录），当前聊天整体重拉
       if (evt.contactId === currentContactId) loadMessages(currentContactId);
@@ -967,6 +970,108 @@ function showConfirmModal(title, body, onConfirm) {
   }
 }
 
+/* ── 系统状态卡 ──────────────────────────────────────────────── */
+const statusBar    = $('statusBar');
+const statusText   = $('statusText');
+const statusMask   = $('statusMask');
+const statusDetail = $('statusDetail');
+let _status = null;
+
+function ago(ts) {
+  if (!ts) return '从未';
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return '刚刚';
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  return `${Math.floor(h / 24)} 天前`;
+}
+
+function fmtTs(ts) {
+  return ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '—';
+}
+
+// 一句话概括：红 = 链路断了 / AI 刚失败，黄 = 需要留意，绿 = 一切正常
+function summarizeStatus(s) {
+  const b = s.bridge, a = s.ai, t = s.token;
+  const problems = [], warns = [];
+  if (!b.lastSeenAt) warns.push('本地端从未上报心跳');
+  else if (b.stale) problems.push(`本地端离线 ${b.staleMinutes} 分钟`);
+  else {
+    if (b.wcdaReachable === false) problems.push('本地端连不上 WCDA');
+    else if (b.wcdaRealtime === false) problems.push('WCDA 未开实时模式');
+    if (b.sseConnected === false) warns.push('SSE 断开，轮询中');
+    if (b.pending?.messages) warns.push(`待重传 ${b.pending.messages} 条`);
+  }
+  if (a.lastRun && !a.lastRun.ok && Date.now() - a.lastRun.at < 3600e3) problems.push('AI 上次生成失败');
+  if (t.relevant && t.warn) warns.push(`token ${t.daysLeft} 天后到期`);
+  const level = problems.length ? 'bad' : warns.length ? 'warn' : 'ok';
+  const text = problems.length ? problems.join('；')
+    : warns.length ? warns.join('；')
+    : `本地端 ${ago(b.lastSeenAt)} · SSE 在线 · AI ${a.label}`;
+  return { level, text };
+}
+
+function renderStatus(s) {
+  _status = s;
+  const { level, text } = summarizeStatus(s);
+  statusBar.className = `status-bar ${level}`;
+  statusText.textContent = text;
+  if (!statusMask.hidden) renderStatusDetail(s);
+}
+
+function renderStatusDetail(s) {
+  const b = s.bridge, a = s.ai, t = s.token;
+  const row = (k, v, cls = '') => `<div class="row"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+  const seen = !!b.lastSeenAt;
+  statusDetail.innerHTML = [
+    row('本地端心跳',
+      seen ? `${ago(b.lastSeenAt)}（${fmtTs(b.lastSeenAt)}）${b.host ? ' · ' + esc(b.host) : ''}${b.version ? ' · v' + esc(b.version) : ''}` : '从未收到，请确认本地端在运行',
+      b.stale ? 'bad' : ''),
+    row('WCDA',
+      !seen ? '—' : b.wcdaReachable === false ? '连不上（软件没开？）'
+        : b.wcdaRealtime === false ? `未开实时模式（${esc(b.wcdaFallbackReason || '')}）`
+        : `实时模式 · 监视 ${b.sessions ?? '?'} 个会话`,
+      seen && (b.wcdaReachable === false || b.wcdaRealtime === false) ? 'bad' : ''),
+    row('SSE 事件流',
+      !seen ? '—' : b.sseConnected ? `已连接 · 最近事件 ${ago(b.lastEventAt)}` : '断开，定时轮询中',
+      seen && !b.sseConnected ? 'warn' : ''),
+    row('最近拉取会话', b.lastPollOkAt ? ago(b.lastPollOkAt) + (b.lastPollError ? ` · 最近错误：${esc(b.lastPollError)}` : '') : '—', b.lastPollError ? 'warn' : ''),
+    row('待重传', b.pending ? `${b.pending.messages} 条 / ${b.pending.contacts} 人` : '—', b.pending?.messages ? 'warn' : ''),
+    row('最近同步消息', s.sync.lastMessageAt ? `${ago(s.sync.lastMessageAt)} · 24 小时内同步 ${s.sync.insertedSince} 条` : '还没有同步过'),
+    row('AI 通道', `${esc(a.label)} · ${esc(a.model)}${a.effort ? ' · 思考深度 ' + esc(a.effort) : ''}`),
+    row('最近一次 AI',
+      a.lastRun ? `${ago(a.lastRun.at)} · ${esc(a.lastRun.contactName || '')} · ${a.lastRun.ok ? `成功，${(a.lastRun.ms / 1000).toFixed(1)} 秒` : '失败：' + esc(a.lastRun.error || '')}`
+        : a.lastSuccessAt ? `上次成功 ${ago(a.lastSuccessAt)}` : '还没生成过',
+      a.lastRun && !a.lastRun.ok ? 'bad' : ''),
+    row('OAuth token',
+      !t.relevant ? '当前通道不依赖'
+        : t.createdAt ? `${esc(t.createdAt)} 生成，预计 ${t.daysLeft} 天后到期`
+        : '未记录生成日期，去设置页填一下才能提醒到期',
+      t.warn ? 'warn' : ''),
+    row('服务器时间', fmtTs(s.now)),
+  ].join('');
+}
+
+async function loadStatus() {
+  try {
+    renderStatus(await api('GET', '/api/status'));
+  } catch {
+    statusBar.className = 'status-bar bad';
+    statusText.textContent = '状态接口不可用';
+  }
+}
+
+statusBar.addEventListener('click', () => {
+  statusMask.hidden = false;
+  if (_status) renderStatusDetail(_status);
+  loadStatus();
+});
+$('statusClose').addEventListener('click', () => { statusMask.hidden = true; });
+$('statusRefresh').addEventListener('click', loadStatus);
+statusMask.addEventListener('click', e => { if (e.target === statusMask) statusMask.hidden = true; });
+setInterval(loadStatus, 60_000);
+
 /* ── Web Push ────────────────────────────────────────────────── */
 
 function urlBase64ToUint8Array(base64String) {
@@ -1049,6 +1154,7 @@ async function init() {
   await loadContacts();
   connectWs();
   initPush();
+  loadStatus();
 }
 
 init();
