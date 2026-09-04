@@ -24,8 +24,10 @@
  */
 
 import { EventEmitter } from 'events';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { initImageAnalyzer, analyzeImage, transcribeVoice } from './image_analyzer.js';
 import { isFullSynced, getLastLocalId, markFullSynced, updateLastLocalId } from './sync_state.js';
+import { dataFile } from './paths.js';
 
 const PAGE_SIZE = 500;                    // 全量同步每页条数（API 上限）
 const FETCH_TIMEOUT_MS = 120_000;         // WCDA 单次请求超时（messages 接口偶尔要十几秒）
@@ -33,6 +35,8 @@ const SSE_DEBOUNCE_MS = 800;              // 一条消息会让多个库文件�
 const SSE_STALL_MS = 60_000;              // SSE 超过这么久没有任何数据（服务端每 15s 有 ping）就重连
 const FIRST_SIGHT_SLACK_MS = 2 * 60_000;  // 首次见到的联系人：比上一轮快照再早这么久的消息都视为旧消息
 const WCDA_DOWN_RETRY_MS = 30_000;        // WCDA 连不上（没开软件 / 没开实时模式）时的重试间隔
+const CATCHUP_GAP_MS = 3_000;             // 后台补漏时两个联系人之间的间隔，给 WCDA 前端留出余量
+const SIG_FILE = 'session_sig.json';      // 会话指纹落盘：重启后能发现停机期间有变化的联系人
 
 // 这些类型即使 isSent=false 也不算"对方来消息"（撤回提示、通话记录），不触发 AI
 const NON_TRIGGER_TYPES = new Set(['system', 'voip']);
@@ -68,6 +72,12 @@ class WeChatBridge extends EventEmitter {
     this._lastEventAt = 0;
     this._wcdaFallback = null;   // WCDA 不在实时模式时 sessions 接口的回退原因
     this._wcdaDown = false;      // WCDA 连不上
+    // 后台补漏队列：指纹比对可能漏掉"停机期间到达"或"同一分钟同样预览"的消息，
+    // 启动时和每隔几小时对已跟踪的联系人逐个核对一次 lastLocalId
+    this._catchup = [];
+    this._catchupTimer = null;
+    this._catchupDone = 0;
+    this._sigPath = dataFile(SIG_FILE);
   }
 
   /** 当前状态快照（心跳上报 / 排障用） */
@@ -83,7 +93,48 @@ class WeChatBridge extends EventEmitter {
       lastEventAt: this._lastEventAt || null,
       sessions: this._sig.size,
       fullSyncing: [...this._fullSyncingNow],
+      catchupPending: this._catchup.length,
     };
+  }
+
+  // ── 会话指纹落盘 ────────────────────────────────────────────────
+
+  _loadSigs() {
+    if (!existsSync(this._sigPath)) return false;
+    try {
+      const data = JSON.parse(readFileSync(this._sigPath, 'utf8'));
+      if (!data?.sessions || !data.savedAt) return false;
+      for (const [u, s] of Object.entries(data.sessions)) this._sig.set(u, s);
+      this._prevSnapshotAt = data.savedAt;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  _saveSigs() {
+    try {
+      writeFileSync(this._sigPath, JSON.stringify({ savedAt: Date.now(), sessions: Object.fromEntries(this._sig) }), 'utf8');
+    } catch (err) {
+      console.warn('[bridge] 指纹落盘失败:', err.message);
+    }
+  }
+
+  // ── 后台补漏 ────────────────────────────────────────────────────
+
+  /** 把已跟踪（有 lastLocalId）的联系人排进补漏队列，逐个核对有没有漏掉的新消息 */
+  _enqueueCatchup(reason, usernames = [...this._sig.keys()]) {
+    const queued = new Set(this._catchup.map(c => c.username));
+    let added = 0;
+    for (const username of usernames) {
+      if (queued.has(username) || getLastLocalId(username) === -1) continue;
+      this._catchup.push({ username, name: this._sig.get(username)?.name || username });
+      added++;
+    }
+    if (added) {
+      console.log(`[bridge] 补漏（${reason}）：排队核对 ${added} 个联系人，后台逐个进行，每个几秒`);
+      this._schedulePoll('catchup');
+    }
   }
 
   start(config) {
@@ -96,6 +147,7 @@ class WeChatBridge extends EventEmitter {
       sessions_limit = 200,
       sse = true,
       heartbeat_ms = 60_000,
+      catchup_interval_hours = 6,
     } = config.wcda;
 
     this._baseUrl = String(url).replace(/\/+$/, '');
@@ -121,9 +173,20 @@ class WeChatBridge extends EventEmitter {
       `兜底轮询 ${this._heartbeatMs / 1000}s，SSE 不可用时每 ${this._pollIntervalMs / 1000}s 轮询`
     );
 
+    // 上次运行保存的会话指纹：第一轮就能发现停机期间有变化的联系人，而不是把当前状态当基线
+    if (this._loadSigs()) {
+      console.log(`[bridge] 已载入 ${this._sig.size} 个会话的指纹（保存于 ${new Date(this._prevSnapshotAt).toLocaleString('zh-CN', { hour12: false })}），先比对停机期间的变化`);
+    }
+
     if (sse) this._sseLoop();
     this._armTimer();
     this._schedulePoll('startup');
+
+    // 每隔几小时把已跟踪的联系人逐个核对一遍，兜住指纹比对漏掉的情况
+    if (catchup_interval_hours > 0) {
+      this._catchupTimer = setInterval(() => this._enqueueCatchup('定时'), catchup_interval_hours * 3600_000);
+      this._catchupTimer.unref?.();
+    }
   }
 
   stop() {
@@ -132,6 +195,8 @@ class WeChatBridge extends EventEmitter {
     this._pollTimer = null;
     clearTimeout(this._sseDebounce);
     this._sseDebounce = null;
+    clearInterval(this._catchupTimer);
+    this._catchupTimer = null;
     this._sseAbort?.abort();
     this._sseAbort = null;
   }
@@ -151,23 +216,40 @@ class WeChatBridge extends EventEmitter {
   async _runPolls(reason) {
     this._polling = true;
     try {
-      while (this._running && this._dirty) {
-        this._dirty = false;
-        try {
-          await this._poll(reason);
-        } catch (err) {
-          this._lastPollError = err.message;
-          // 连接类错误（没开 WCDA、后端没起来）：只报一次，降低重试频率，恢复后再恢复节奏
-          const connErr = err.name === 'TimeoutError' || /fetch failed|ECONNREFUSED|ECONNRESET|socket hang up/i.test(err.message);
-          if (connErr && !this._wcdaDown) {
-            this._wcdaDown = true;
-            console.error(`[bridge] WCDA 不可达（${err.message}），改为每 ${WCDA_DOWN_RETRY_MS / 1000}s 重试，恢复前不再重复提示`);
-            this._armTimer();
-          } else if (!connErr) {
-            console.error('[bridge] 轮询出错:', err.message);
+      while (this._running) {
+        if (this._dirty) {
+          this._dirty = false;
+          try {
+            await this._poll(reason);
+          } catch (err) {
+            this._lastPollError = err.message;
+            // 连接类错误（没开 WCDA、后端没起来）：只报一次，降低重试频率，恢复后再恢复节奏
+            const connErr = err.name === 'TimeoutError' || /fetch failed|ECONNREFUSED|ECONNRESET|socket hang up/i.test(err.message);
+            if (connErr && !this._wcdaDown) {
+              this._wcdaDown = true;
+              console.error(`[bridge] WCDA 不可达（${err.message}），改为每 ${WCDA_DOWN_RETRY_MS / 1000}s 重试，恢复前不再重复提示`);
+              this._armTimer();
+            } else if (!connErr) {
+              console.error('[bridge] 轮询出错:', err.message);
+            }
           }
+          reason = 'coalesced';
+          continue;
         }
-        reason = 'coalesced';
+        // 没有待处理的事件时，后台补漏一个联系人（事件优先：每处理一个都回到循环顶部看有没有新事件）
+        if (this._catchup.length && !this._wcdaDown) {
+          const { username, name } = this._catchup.shift();
+          try {
+            await this._doIncrementalSync(username, name, false, (this._prevSnapshotAt || Date.now()) - FIRST_SIGHT_SLACK_MS);
+          } catch (err) {
+            console.error(`[bridge] 补漏 ${name} 出错:`, err.message);
+          }
+          this._catchupDone++;
+          if (!this._catchup.length) console.log(`[bridge] 补漏完成，共核对 ${this._catchupDone} 个联系人`);
+          if (this._running && !this._dirty) await new Promise(r => setTimeout(r, CATCHUP_GAP_MS));
+          continue;
+        }
+        break;
       }
     } finally {
       this._polling = false;
@@ -289,23 +371,32 @@ class WeChatBridge extends EventEmitter {
     if (!sessions?.length) return;
 
     const changed = [];
+    const unseen = [];   // 本轮新出现、之前没有指纹的会话
     for (const s of sessions) {
       if (this._ignoreGroups && s.isGroup) continue;
-      const sig = { t: String(s.lastMessageTime ?? ''), msg: String(s.lastMessage ?? ''), unread: Number(s.unreadCount) || 0 };
+      const sig = { t: String(s.lastMessageTime ?? ''), msg: String(s.lastMessage ?? ''), unread: Number(s.unreadCount) || 0, name: s.name };
       const prev = this._sig.get(s.username);
       this._sig.set(s.username, sig);
       if (prev === undefined) {
-        if (prevSnapshotAt === 0) continue;   // 启动后第一轮：只建立指纹基线
+        unseen.push(s.username);
+        if (prevSnapshotAt === 0) continue;   // 完全没有历史指纹（首次运行）：只建立基线
         changed.push(s);                      // 之后新出现的会话：当作有变化
         continue;
       }
       // 只有未读数减少（用户在微信里看了一眼）不算变化，避免白拉一次很慢的 messages 接口
       if (prev.t !== sig.t || prev.msg !== sig.msg || sig.unread > prev.unread) changed.push(s);
     }
+    this._saveSigs();
 
     if (prevSnapshotAt === 0) {
       console.log(`[bridge] 已建立 ${this._sig.size} 个会话的指纹基线（${Date.now() - t0}ms），等待变化`);
+      // 没有历史指纹就无法知道停机期间谁来过消息，把已跟踪的联系人排进后台补漏逐个核对
+      this._enqueueCatchup('启动');
       return;
+    }
+    if (reason === 'startup' && unseen.length) {
+      // 有历史指纹但个别会话没记录过（上次运行时不在列表里），也核对一下
+      this._enqueueCatchup('启动', unseen);
     }
     if (!changed.length) {
       if (reason !== 'heartbeat') console.log(`[bridge] ${reason}: 会话列表无变化（${Date.now() - t0}ms）`);

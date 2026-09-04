@@ -37,6 +37,10 @@ service/ 的结构：计划任务 → `start_bridge.vbs`（隐藏窗口）→ `s
   只对变化的联系人调 `/api/chat/messages`（这个接口单次要 3~18 秒，是最贵的调用）。
   SSE 正常时每 heartbeat_ms 兜底拉一次会话列表；SSE 断开时每 poll_interval_ms 拉一次。
 - **WCDA messages 分页语义**：realtime 模式 offset 从最新一条往旧数，order=asc 只是把那一页反转。
+- **指纹落盘与补漏**：每轮比对后把指纹写到 session_sig.json（含保存时间）。重启时先载入，第一轮就能发现停机期间有变化的联系人；
+  完全没有指纹文件（首次运行）时只建基线，同时把已跟踪的联系人排进后台补漏队列，在没有事件要处理时逐个核对 lastLocalId，
+  每个间隔 3 秒；之后每 `catchup_interval_hours`（默认 6）小时再核对一遍，兜住"同一分钟同样预览"这类指纹比对漏掉的情况。
+  2026-09-04 曾因停机 1 小时 + 启动只建基线漏掉 3 条消息，就是这个机制补的。
 - **首次见到的联系人**：没有 lastLocalId，用消息 createTime 与上一轮快照时间比较，只把更新的当新消息。
 - **首次收到对方消息**：先全量拉取该联系人的历史（isFullSync=true，VPS 只入库不触发 AI），再上报新消息触发 AI。
 - **触发规则**：system（撤回提示等）和 voip 类型即使 isSent=false 也不算对方来消息；VPS 端同样按 renderType 排除。

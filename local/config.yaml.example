@@ -13,6 +13,8 @@ wcda:
   sessions_limit: 200
   # 每次拉取的最近消息条数（上下文窗口）；离线期间新消息超过这个数会自动分页补拉
   context_limit: 30
+  # 每隔几小时把已跟踪的联系人在后台逐个核对一遍，兜住指纹比对漏掉的消息；0 为关闭
+  catchup_interval_hours: 6
 
 gemini:
   api_key: "YOUR_GEMINI_API_KEY"

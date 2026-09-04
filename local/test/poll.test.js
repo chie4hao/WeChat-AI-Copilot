@@ -34,11 +34,22 @@ globalThis.fetch = async (url) => {
 };
 after(() => { globalThis.fetch = realFetch; });
 
-function makeBridge() {
+const SIG_PATH = path.join(process.env.HAKUREI_DATA_DIR, 'session_sig.json');
+
+// 不走 start()（它会立刻异步轮询、起定时器），直接把字段摆好，测试才是确定的
+function makeBridge({ keepSigs = false } = {}) {
+  if (!keepSigs) { try { fs.unlinkSync(SIG_PATH); } catch {} }
   const b = new WeChatBridge();
-  b.start({ wcda: { url: 'http://fake', sse: false, poll_interval_ms: 60_000, context_limit: 5 }, ignore_groups: true });
-  clearTimeout(b._pollTimer); // 不要真的定时轮询
-  b._polling = false; b._dirty = false;
+  b._baseUrl = 'http://fake';
+  b._contextLimit = 5;
+  b._sessionsLimit = 200;
+  b._pollIntervalMs = 60_000;
+  b._heartbeatMs = 60_000;
+  b._ignoreGroups = true;
+  b._debugSelfTrigger = false;
+  b._analyzeImages = false;
+  b._running = true;
+  if (keepSigs) b._loadSigs();
   return b;
 }
 const sess = (username, name, lastMessage, lastMessageTime, unreadCount = 0, isGroup = false) => ({ username, name, lastMessage, lastMessageTime, unreadCount, isGroup });
@@ -72,6 +83,52 @@ test('第一轮只建基线；之后只对指纹变化的会话拉消息', async
   sessions.push(sess('u3', 'C', '新朋友', '10:05'));
   await b._poll('sse');
   assert.deepEqual(synced, ['u1', 'u2', 'u3'], '新出现的会话当作有变化');
+});
+
+test('指纹落盘：重启后第一轮就能发现停机期间有变化的联系人', async () => {
+  const a = makeBridge();
+  a._doIncrementalSync = async () => {};
+  sessions = [sess('r1', 'R1', '你好', '10:00'), sess('r2', 'R2', '在吗', '09:00')];
+  await a._poll('startup');
+  assert.ok(fs.existsSync(SIG_PATH), '轮询后指纹已落盘');
+  const saved = JSON.parse(fs.readFileSync(SIG_PATH, 'utf8'));
+  assert.ok(saved.savedAt > 0);
+  assert.equal(saved.sessions.r1.msg, '你好');
+
+  // "停机期间" r2 来了新消息；新实例载入旧指纹后第一轮应当只同步 r2
+  sessions[1] = sess('r2', 'R2', '新消息', '10:30');
+  const b = makeBridge({ keepSigs: true });
+  assert.ok(b._prevSnapshotAt > 0, '载入指纹后不再当作首次运行');
+  const synced = [];
+  b._doIncrementalSync = async (u) => { synced.push(u); };
+  await b._poll('startup');
+  assert.deepEqual(synced, ['r2']);
+});
+
+test('首次运行没有历史指纹：把已跟踪的联系人排进补漏队列，后台逐个核对', async () => {
+  const b = makeBridge();
+  state.updateLastLocalId('cu1', 5);           // 已跟踪
+  sessions = [sess('cu1', 'CU1', 'x', '10:00'), sess('cu2', 'CU2', 'y', '09:00')];   // cu2 未跟踪
+  const polls = [];
+  b._schedulePoll = (r) => { polls.push(r); };
+  await b._poll('startup');
+  assert.deepEqual(b._catchup.map(c => c.username), ['cu1'], '只排已跟踪的联系人');
+  assert.deepEqual(polls, ['catchup']);
+  assert.equal(b.getStatus().catchupPending, 1);
+
+  // _runPolls 在没有事件时处理补漏队列
+  const synced = [];
+  b._doIncrementalSync = async (u, name) => { synced.push(u + '/' + name); b._running = false; };  // 处理完就停，免得等 3 秒间隔
+  b._dirty = false;
+  await b._runPolls('catchup');
+  assert.deepEqual(synced, ['cu1/CU1']);
+  assert.equal(b._catchup.length, 0);
+
+  // 重复入队会去重，未跟踪的不入队
+  b._running = true;
+  b._enqueueCatchup('x', ['cu1', 'cu2']);
+  b._enqueueCatchup('x', ['cu1']);
+  assert.deepEqual(b._catchup.map(c => c.username), ['cu1']);
 });
 
 test('WCDA 回退到解密快照时记录原因', async () => {
@@ -144,4 +201,16 @@ test('SSE change 事件去抖后触发一次轮询', async () => {
   assert.equal(polls, 1, '两次 change 合并成一次');
   assert.ok(b.getStatus().lastEventAt > 0);
   b.stop();
+});
+
+test('start() 会载入指纹、起定时器，stop() 能全部清掉', async () => {
+  makeBridge();   // 清掉指纹文件
+  const b = new WeChatBridge();
+  b.start({ wcda: { url: 'http://fake', sse: false, poll_interval_ms: 60_000, context_limit: 5, catchup_interval_hours: 1 }, ignore_groups: true });
+  assert.ok(b._pollTimer && b._catchupTimer);
+  b.stop();
+  assert.equal(b._pollTimer, null);
+  assert.equal(b._catchupTimer, null);
+  assert.equal(b.getStatus().running, false);
+  await new Promise(r => setTimeout(r, 50));   // 让 start() 触发的那次异步轮询结束
 });
