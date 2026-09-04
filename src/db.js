@@ -3,7 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '..', 'data.db');
+// COPILOT_DB_PATH 供迁移测试指向副本库，平时不设
+const DB_PATH = process.env.COPILOT_DB_PATH || path.join(__dirname, '..', 'data.db');
 
 let db;
 
@@ -27,7 +28,8 @@ function initSchema() {
       notes TEXT,
       last_message TEXT,
       last_time INTEGER,
-      has_pending_suggestion INTEGER DEFAULT 0
+      has_pending_suggestion INTEGER DEFAULT 0,
+      name_manual INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -38,27 +40,29 @@ function initSchema() {
       timestamp INTEGER NOT NULL,
       type TEXT NOT NULL DEFAULT 'text',
       wechat_create_time INTEGER,
+      local_id INTEGER,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
-
-    -- 用于去重：同一联系人同一微信时间戳只存一次
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup
-      ON messages (contact_id, wechat_create_time)
-      WHERE wechat_create_time IS NOT NULL;
-
-    -- 旧库迁移：补加 wechat_create_time 列
-    -- （IF NOT EXISTS 语法 SQLite 不支持，用 PRAGMA 判断）
   `);
 
-  const cols = db.prepare('PRAGMA table_info(messages)').all().map(r => r.name);
-  if (!cols.includes('wechat_create_time')) {
-    db.exec('ALTER TABLE messages ADD COLUMN wechat_create_time INTEGER');
-    db.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup
-        ON messages (contact_id, wechat_create_time)
-        WHERE wechat_create_time IS NOT NULL
-    `);
-  }
+  // 旧库迁移（SQLite 不支持 ADD COLUMN IF NOT EXISTS，用 PRAGMA 判断）
+  const msgCols = db.prepare('PRAGMA table_info(messages)').all().map(r => r.name);
+  if (!msgCols.includes('wechat_create_time')) db.exec('ALTER TABLE messages ADD COLUMN wechat_create_time INTEGER');
+  if (!msgCols.includes('local_id'))           db.exec('ALTER TABLE messages ADD COLUMN local_id INTEGER');
+  const contactCols = db.prepare('PRAGMA table_info(contacts)').all().map(r => r.name);
+  if (!contactCols.includes('name_manual'))    db.exec('ALTER TABLE contacts ADD COLUMN name_manual INTEGER DEFAULT 0');
+
+  // 去重改为按微信本地消息 id（local_id）。旧的 (contact_id, wechat_create_time) 唯一索引精度只有秒，
+  // 同一秒内的多条消息会被它吞掉，必须删掉；没有 local_id 的旧行在 syncMessages 里按"同秒同内容"兜底去重。
+  db.exec(`
+    DROP INDEX IF EXISTS idx_messages_dedup;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id
+      ON messages (contact_id, local_id) WHERE local_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_messages_contact_time
+      ON messages (contact_id, wechat_create_time);
+    CREATE INDEX IF NOT EXISTS idx_messages_contact_ts
+      ON messages (contact_id, timestamp);
+  `);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -102,7 +106,7 @@ function upsertContact({ wxid, name, avatar }) {
     INSERT INTO contacts (wxid, name, avatar, last_time)
     VALUES (@wxid, @name, @avatar, @last_time)
     ON CONFLICT(wxid) DO UPDATE SET
-      name   = excluded.name,
+      name   = CASE WHEN name_manual = 1 THEN name ELSE excluded.name END,
       avatar = COALESCE(excluded.avatar, avatar)
   `).run({ wxid, name, avatar: avatar || null, last_time: Date.now() });
 
@@ -139,9 +143,10 @@ function setPendingSuggestion(contactId, value) {
     .run(value ? 1 : 0, contactId);
 }
 
+// 手动改名后置 name_manual=1，之后本地端同步上来的微信昵称不再覆盖它
 function updateContactName(contactId, name) {
   getDb()
-    .prepare('UPDATE contacts SET name = ? WHERE id = ?')
+    .prepare('UPDATE contacts SET name = ?, name_manual = 1 WHERE id = ?')
     .run(name, contactId);
 }
 
@@ -184,46 +189,58 @@ function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' })
 
 /**
  * 批量同步来自本地端的消息，自动去重。
- * messages 格式: [{ content, isSelf, createTime(Unix秒), renderType }]
- * 返回实际新插入的数量。
+ * messages 格式: [{ localId?, content, isSelf, createTime(Unix秒), renderType }]
+ * 返回 { inserted, rows }，rows 是实际新插入的行（供广播给前端）。
+ *
+ * 去重规则：
+ *   - 带 localId：库里已有同 local_id 的行，或有"无 local_id 且同秒同内容"的旧行 → 跳过
+ *   - 不带 localId（旧版本地端）：库里已有同秒同内容的行 → 跳过
+ * 微信时间戳精度只有秒，所以不能单靠它去重，否则同一秒内的多条消息会丢。
  */
 function syncMessages({ contactId, messages }) {
   const db = getDb();
 
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO messages (contact_id, content, is_self, timestamp, type, wechat_create_time)
-    VALUES (@contactId, @content, @isSelf, @timestamp, @type, @wechatCreateTime)
+    INSERT INTO messages (contact_id, content, is_self, timestamp, type, wechat_create_time, local_id)
+    SELECT @contactId, @content, @isSelf, @timestamp, @type, @wechatCreateTime, @localId
+    WHERE NOT EXISTS (
+      SELECT 1 FROM messages
+      WHERE contact_id = @contactId
+        AND (
+          (@localId IS NOT NULL AND local_id = @localId)
+          OR ((local_id IS NULL OR @localId IS NULL)
+              AND wechat_create_time = @wechatCreateTime AND content = @content)
+        )
+    )
   `);
 
+  // 只用更新的消息刷新预览，补传的旧消息不会把预览和排序拉回去
   const updateContact = db.prepare(`
-    UPDATE contacts SET last_message = @content, last_time = @timestamp WHERE id = @contactId
+    UPDATE contacts SET last_message = @content, last_time = @timestamp
+    WHERE id = @contactId AND (last_time IS NULL OR last_time <= @timestamp)
   `);
 
-  let inserted = 0;
+  const rows = [];
   const insertMany = db.transaction((msgs) => {
     for (const m of msgs) {
-      const timestampMs = m.createTime * 1000;
-      const result = insert.run({
-        contactId,
-        content: m.content || '',
-        isSelf: m.isSelf ? 1 : 0,
-        timestamp: timestampMs,
-        type: m.renderType === 'text' ? 'text' : m.renderType,
-        wechatCreateTime: m.createTime,
-      });
-      if (result.changes > 0) inserted++;
-    }
-    // 有新消息时才更新联系人预览（避免重复发送时用旧时间戳覆盖）
-    if (inserted > 0) {
-      const last = msgs[msgs.length - 1];
-      if (last) {
-        updateContact.run({ content: last.content || '', timestamp: last.createTime * 1000, contactId });
+      const timestamp = m.createTime * 1000;
+      const type = m.renderType || 'text';
+      const content = m.content || '';
+      const isSelf = m.isSelf ? 1 : 0;
+      const localId = Number.isInteger(m.localId) ? m.localId : null;
+      const result = insert.run({ contactId, content, isSelf, timestamp, type, wechatCreateTime: m.createTime, localId });
+      if (result.changes > 0) {
+        rows.push({ id: Number(result.lastInsertRowid), contact_id: contactId, content, is_self: isSelf, timestamp, type });
       }
+    }
+    if (rows.length) {
+      const newest = rows.reduce((a, b) => (b.timestamp >= a.timestamp ? b : a));
+      updateContact.run({ content: newest.content, timestamp: newest.timestamp, contactId });
     }
   });
 
   insertMany(messages);
-  return inserted;
+  return { inserted: rows.length, rows };
 }
 
 function deleteMessage(messageId) {

@@ -37,7 +37,8 @@ const server = isHttps
 
 const wss = new WebSocketServer({ server });
 
-app.use(express.json());
+// 默认上限 100kb；本地端全量同步一批 200 条带图片描述的消息就会超过，放宽
+app.use(express.json({ limit: '20mb' }));
 
 // ── IP 白名单 ─────────────────────────────────────────────────
 const allowedIPs = config.get().server?.allowedIPs;
@@ -309,15 +310,22 @@ app.post('/api/sync', (req, res) => {
     return res.json({ ok: true, inserted: 0, triggered: false });
   }
 
-  // 写入数据库（自动去重）
+  // 写入数据库（按 localId 去重）
   const contact = db.upsertContact({ wxid, name, avatar: null });
-  const inserted = db.syncMessages({ contactId: contact.id, messages: textMessages });
+  const { inserted, rows } = db.syncMessages({ contactId: contact.id, messages: textMessages });
 
   broadcast({ type: 'contacts_update' });
+  // 让打开着的聊天窗口实时出现新消息：少量逐条推，大批量（全量同步）让前端整体重拉
+  if (rows.length && rows.length <= 50) {
+    for (const row of rows) broadcast({ type: 'message', contactId: contact.id, message: row });
+  } else if (rows.length) {
+    broadcast({ type: 'messages_reload', contactId: contact.id });
+  }
 
-  // 最新一条是对方发的，触发 AI
+  // 最后一条"真实"消息是对方发的才触发 AI：撤回提示等 system 类型 isSelf 也是 false，要跳过
   // 注意：全量同步后触发消息会被去重（inserted=0），但仍需触发 AI，所以不检查 inserted
-  const hasNewIncoming = !skipAi && !textMessages[textMessages.length - 1].isSelf;
+  const lastReal = [...textMessages].reverse().find(m => m.renderType !== 'system');
+  const hasNewIncoming = !skipAi && !!lastReal && !lastReal.isSelf;
   if (hasNewIncoming) {
     const fresh = db.getContactByWxid(wxid);
     res.json({ ok: true, inserted, triggered: true });

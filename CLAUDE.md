@@ -6,9 +6,10 @@
 
 **核心理念**：AI 只是助手，人永远是最终决策者。所有 AI 建议都需要人工审核才会发出。
 
-**当前接入方式**：暂不接入微信客户端（WeChatFerry 不稳定且有封号风险）。目前通过两种方式导入聊天记录：
-1. **PWA Share Target**（主要方式）：手机微信多选消息 → 分享 → 选"AI Copilot" → 自动解析导入
-2. **Mock 栏手动注入**：界面底部的调试栏，逐条或批量输入消息
+**当前接入方式**：不直接挂钩微信客户端（WeChatFerry 不稳定且有封号风险）。聊天记录有三个来源：
+1. **本地端实时同步**（主要方式）：Windows 电脑上的 `local/` 桥接读取 WeChatDataAnalysis 解密出的实时消息，POST 到 `/api/sync`，对方来消息时自动触发 AI（见下文"本地端同步"）
+2. **PWA Share Target**：手机微信多选消息 → 分享 → 选"AI Copilot" → 自动解析导入
+3. **Mock 栏手动注入**：界面底部的调试栏，逐条或批量输入消息
 
 ---
 
@@ -24,8 +25,12 @@
 - [x] 设置页面（settings.html）— 含所有配置项（API Key、模型、证书路径、IP 白名单等）
 - [x] PWA（manifest.json / sw.js / icon）— 可安装到手机桌面，支持 Share Target 接收微信分享
 - [x] 导入页面（import.html）— 解析微信聊天记录格式，批量导入，自动识别"我"
-- [ ] 联系人管理（手动添加/删除）— 目前只能通过导入自动创建
-- [ ] WeChatFerry 真实消息接入（Windows，低优先级）
+- [x] 联系人管理（新建 / 改名 / 编辑资料 / 清空记录 / 删除，右键或长按联系人）
+- [x] 消息管理（编辑 / 切换方向 / 删除 / "以此为止获取建议"复盘，右键或长按消息）
+- [x] 本地端实时同步 `/api/sync`（按微信 localId 去重，新消息实时推到打开的聊天窗口）
+- [x] Web Push 通知（VAPID，AI 建议生成后推送到手机，点通知直达该联系人）
+- [x] 三 provider：Claude Code（Max 订阅）/ Claude API（可走反代）/ Gemini
+- [ ] WeChatFerry 真实消息接入（已被本地端同步方案取代，不再计划）
 
 ---
 
@@ -89,12 +94,31 @@ gemini:
   temperature: 0.9
   stream: true                     # true=流式逐字显示，false=等完整结果
 
+claude_code:                       # ① 优先级最高：开关打开则走 Claude Max 订阅（Agent SDK）
+  enabled: false
+  oauth_token: "sk-ant-oat01-..."  # 本地 claude setup-token 生成
+  model: "claude-opus-5"
+
+claude:                            # ② 其次：有 api_key 时走 Claude API
+  api_key: ""
+  base_url: ""                     # 反代地址（如 clewdr 的 /code），留空直连官方
+  model: "claude-opus-5"
+  candidate_count: 3
+  effort: "medium"                 # low/medium/high/xhigh/max，反代时 xhigh 自动降 high
+
 server:
   port: 3000
   certPath: /root/cert/example.com/fullchain.pem  # 有值则自动启用 HTTPS
   keyPath:  /root/cert/example.com/privkey.pem
   allowedIPs:                      # IP 白名单，空则不限制
     - "1.2.3.4"                    # 填 VPS 公网 IP（通过代理访问时来源是 VPS 自身 IP）
+  sync_secret: "..."               # 本地端上报 /api/sync 时的 X-Secret，与 local/config.yaml 的 vps.secret 一致
+  vapid_public_key: "..."          # Web Push 密钥对（npx web-push generate-vapid-keys）
+  vapid_private_key: "..."
+  vapid_subject: "mailto:you@example.com"
+
+skip_names: ["美团"]               # 昵称含关键词则不自动触发 AI（黑名单）
+only_names: []                     # 非空时只对昵称含关键词的人自动触发（白名单）
 
 prompt: |
   你是我的聊天参谋...              # 系统 prompt，聊天记录由程序自动拼入
@@ -119,16 +143,22 @@ prompt: |
 | last_message | TEXT | 最后一条消息预览（列表显示用） |
 | last_time | INTEGER | 最后消息时间戳（毫秒），列表排序依据 |
 | has_pending_suggestion | INTEGER | 0/1，AI 建议未读标记（红点）；选中联系人时自动清除 |
+| name_manual | INTEGER | 0/1，在网页上手动改过名；为 1 时本地端同步上来的微信昵称不再覆盖 |
 
 **messages**
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | INTEGER PK | 自增主键 |
 | contact_id | INTEGER FK | 关联 contacts.id |
-| content | TEXT | 消息文本 |
+| content | TEXT | 消息文本（图片/语音由本地端转成文字描述） |
 | is_self | INTEGER | 1=自己发，0=对方发 |
 | timestamp | INTEGER | 毫秒时间戳 |
-| type | TEXT | 消息类型，目前只有 `'text'` |
+| type | TEXT | `'text'`；本地端同步的消息存微信 renderType（image/voice/quote/system/link…） |
+| wechat_create_time | INTEGER | 微信消息时间（秒），仅同步消息有 |
+| local_id | INTEGER | 微信本地消息 id，仅同步消息有；`(contact_id, local_id)` 唯一，是去重依据 |
+
+**去重规则（syncMessages）**：带 local_id 的消息按 local_id 去重；没有 local_id 的旧行或旧版本地端发来的消息按"同秒同内容"兜底。
+微信时间戳精度只有秒，早期只按 `(contact_id, wechat_create_time)` 去重会吞掉同一秒内的第二条消息，已改掉。
 
 **ai_sessions**（每个联系人唯一，对方发新消息时 reset，旧记录删除重建）
 | 字段 | 类型 | 说明 |
@@ -136,6 +166,9 @@ prompt: |
 | id | INTEGER PK | 自增主键 |
 | contact_id | INTEGER UNIQUE FK | 关联 contacts.id，每人只有一个 session |
 | created_at | INTEGER | 创建时间戳 |
+| cc_session_id | TEXT | Claude Code provider 的会话 id，服务重启后 resume 追问用 |
+
+**push_subscriptions**：Web Push 订阅（endpoint 唯一，p256dh / auth / created_at），410/404 时自动清除。
 
 **ai_messages**（AI 面板展示内容，按 id 顺序即展示顺序）
 | 字段 | 类型 | 说明 |
@@ -154,6 +187,9 @@ getContactByWxid(wxid)                       // 按 wxid 查
 updateContactNotes(contactId, notes)
 setPendingSuggestion(contactId, value)       // value: true/false
 insertMessage({ contactId, content, isSelf, timestamp, type })  // 同时更新 last_message/last_time
+syncMessages({ contactId, messages })        // 本地端批量同步，去重后返回 { inserted, rows }（rows 供广播）
+updateContactName(contactId, name)           // 改名并置 name_manual=1
+clearMessages / deleteContact / deleteMessage / updateMessage
 getRecentMessages(contactId, limit=350)      // 按时间戳 DESC 取，然后 reverse（返回正序）
 getMessagesUpTo(contactId, messageId, limit=350)  // 复盘用：截止到某条消息（含）的最近记录，消息不存在返回 null
 resetAiSession(contactId)                    // 删旧 session + ai_messages，重建新 session
@@ -229,18 +265,53 @@ resetSession(contactId)   // 内部用，server.js 不直接调
 | POST | `/api/import` | 批量导入聊天记录（body: `{ wxid, otherName, messages: [{content, isSelf}] }`） |
 | POST | `/api/mock/message` | 注入单条消息（body: `{ wxid, name, content, isSelf, noAi }`） |
 | POST | `/api/mock/trigger` | 手动触发 AI 生成（body: `{ contactId, uptoMessageId? }`，带 uptoMessageId 时以该消息为最后一条复盘） |
+| POST | `/api/sync` | 本地端上报（header `X-Secret`；body 见下文"本地端同步"） |
+| GET | `/api/contacts/:id/ai-preview` | 预览即将发给 AI 的完整内容（`?upto=<messageId>` 复盘），不实际请求 |
+| POST | `/api/contacts` | 新建联系人（body: `{ name }`，wxid 为 `manual_<时间戳>`） |
+| POST | `/api/contacts/:id/rename` | 改名（置 name_manual=1，之后同步不覆盖） |
+| POST | `/api/contacts/:id/clear-messages` | 清空聊天记录 |
+| DELETE | `/api/contacts/:id` | 删除联系人（级联删消息与 AI session） |
+| POST / DELETE | `/api/messages/:id` | 编辑消息（body: `{ content?, isSelf? }`）/ 删除消息 |
+| GET | `/api/push/vapid-public-key` | Web Push 公钥（未配置返回 null，前端隐藏铃铛） |
+| POST / DELETE | `/api/push/subscribe` | 保存 / 删除推送订阅 |
+| GET | `/api/provider-status` | 当前实际生效的 AI provider（设置页顶部状态条） |
 | GET | `/api/settings` | 读取 config.yaml（含 API Key，生产环境应限制 IP） |
-| POST | `/api/settings` | 保存 config.yaml（合并 server 字段，不覆盖 certPath 等） |
+| POST | `/api/settings` | 保存 config.yaml（合并 server / claude_code 字段，不覆盖 certPath、oauth_token 等） |
 
 **WebSocket 事件（服务端 → 所有客户端广播）：**
 ```js
-{ type: 'message', contactId, message }          // 新消息入库
+{ type: 'message', contactId, message }          // 新消息入库（Mock、同步 ≤50 条时逐条推）
+{ type: 'messages_reload', contactId }            // 同步一次入库超过 50 条（全量补录），前端整体重拉当前聊天
 { type: 'contacts_update' }                       // 联系人列表变化，前端重新拉取
-{ type: 'ai_start', contactId }                   // AI 开始生成
+{ type: 'ai_start', contactId, fresh }            // AI 开始生成；fresh=true 是新一轮（清空面板），false 是追问
 { type: 'ai_chunk', contactId, chunk }            // 流式 chunk（纯文本，非 JSON 外壳）
 { type: 'ai_complete', contactId, result }        // result = { message, candidates }
 { type: 'ai_error', contactId, error }            // 错误信息
 ```
+
+**前端收到 `message` 时**：时间戳不早于当前最后一条就追加，否则（补传的旧消息）整体重拉，避免乱序；同一 id 不重复渲染。
+
+---
+
+## 本地端同步（/api/sync）
+
+本地端代码在仓库外的 `local/` 文件夹（见其 CLAUDE.md），它读取 WeChatDataAnalysis 的实时消息并上报：
+
+```js
+POST /api/sync   header: X-Secret: <server.sync_secret>
+{
+  wxid, name, isGroup,
+  skipAi,                 // true = 只入库不触发 AI（全量补录历史、自己发的消息）
+  messages: [{ localId, content, isSelf, createTime /*秒*/, renderType }],
+  syncedAt
+}
+→ { ok, inserted, triggered }
+```
+
+服务端流程：`upsertContact` → `syncMessages`（按 localId 去重，返回新插入行）→ 广播 `contacts_update` +
+`message`/`messages_reload` → 若 `!skipAi` 且最后一条非 system 类型的消息是对方发的 → `triggerAi`。
+system 类型（"xx撤回了一条消息"等）isSelf 也可能是 false，判断触发时必须跳过。
+`express.json` 上限已放宽到 20mb（一批 200 条带图片描述的消息会超过默认的 100kb）。
 
 **核心消息处理流程：**
 ```
@@ -412,6 +483,8 @@ npm run dev      # node --watch src/server.js（开发模式，文件变更自�
 - **`data.db` 不提交 git**：`.gitignore` 已排除
 - **`contactId` 类型**：数据库返回 Number，WebSocket 事件中也是 Number，前端比较时注意不要用字符串
 - **settings 保存合并逻辑**：`POST /api/settings` 用 `Object.assign({}, current.server, incoming.server)` 合并，certPath 等不会被前端表单覆盖丢失
+- **数据库迁移**：`initSchema()` 里用 `PRAGMA table_info` 判断缺列再 ALTER，启动即迁移；改 schema 前先 `cp data.db data.db.bak`，可用 `COPILOT_DB_PATH=/tmp/copy.db node ...` 在副本上先跑一遍
+- **同步去重只认 localId**：不要再加按时间戳的唯一索引，微信时间戳只有秒级精度
 - **better-sqlite3 Windows 安装失败**：换 `sql.js`（异步 API，需要改 db.js）
 - **WeChatFerry**：只能跑在 Windows，需要特定版本微信，有封号风险（低优先级，暂不实现）
 - **PM2 启动路径**：config.js 用 `__dirname` 定位 config.yaml，与 PM2 从哪个目录启动无关

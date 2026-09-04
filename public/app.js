@@ -245,7 +245,7 @@ function buildMessageEl(m) {
   const contact = contacts.find(c => c.id === m.contact_id);
   const senderName = m.is_self ? '我' : (contact ? contact.name : '对方');
   return `
-    <div class="message ${cls}" data-msg-id="${m.id}" data-is-self="${m.is_self}">
+    <div class="message ${cls}" data-msg-id="${m.id}" data-is-self="${m.is_self}" data-ts="${m.timestamp}">
       <div class="msg-sender">${esc(senderName)}</div>
       <div class="msg-bubble">${esc(m.content)}</div>
       <div class="msg-time">${formatTime(m.timestamp)}</div>
@@ -254,6 +254,7 @@ function buildMessageEl(m) {
 }
 
 function appendMessage(msg) {
+  if (messages.querySelector(`[data-msg-id="${msg.id}"]`)) return; // 同一条消息重复推送时不重复渲染
   const div = document.createElement('div');
   div.innerHTML = buildMessageEl(msg);
   const el = div.firstElementChild;
@@ -428,6 +429,10 @@ function handleWsEvent(evt) {
     case 'contacts_update':
       loadContacts();
       break;
+    case 'messages_reload':
+      // 本地端一次同步了大批消息（全量补录），当前聊天整体重拉
+      if (evt.contactId === currentContactId) loadMessages(currentContactId);
+      break;
     case 'ai_start':
       setContactGenerating(evt.contactId, true);
       if (evt.contactId === currentContactId) onAiStart(evt.fresh);
@@ -449,8 +454,14 @@ function handleWsEvent(evt) {
 }
 
 function handleIncomingMessage(evt) {
-  if (evt.contactId === currentContactId) {
+  if (evt.contactId !== currentContactId) return;
+  const last = messages.lastElementChild;
+  const lastTs = last ? Number(last.dataset.ts || 0) : 0;
+  if (evt.message.timestamp >= lastTs) {
     appendMessage(evt.message);
+  } else {
+    // 补传的旧消息落在中间，追加会乱序，整体重拉
+    loadMessages(currentContactId);
   }
 }
 
