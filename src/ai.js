@@ -711,9 +711,20 @@ async function _claudeStreamingRequest(session, message, { onChunk, onComplete }
     throw new Error('回复被截断（思考占用过多 token），请在设置中降低思考深度');
   }
 
+  const result = parseAiJson(buffer);
+
+  // 偶尔模型会把 message 留空只给候选（结构化输出下见过一次），重试一次比把空分析展示给用户好
+  if (!String(result.message ?? '').trim() && !session._retriedEmpty) {
+    session._retriedEmpty = true;
+    session.messages.pop();
+    console.warn('[ai] 模型返回的分析为空，重试一次');
+    return _claudeStreamingRequest(session, message, { onChunk, onComplete });
+  }
+  session._retriedEmpty = false;
+
   session.messages.push({ role: 'assistant', content: buffer });
 
-  onComplete?.(parseAiJson(buffer));
+  onComplete?.(result);
 }
 
 // ── Gemini streaming ──────────────────────────────────────────
