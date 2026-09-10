@@ -317,7 +317,7 @@ app.post('/api/sync', (req, res) => {
     return res.json({ ok: true, inserted: 0, triggered: false });
   }
 
-  // 写入数据库（按 localId 去重）
+  // 按完整消息标识去重；localId 在微信换消息库后会重置。
   const contact = db.upsertContact({ wxid, name, avatar: null });
   const { inserted, rows } = db.syncMessages({ contactId: contact.id, messages: textMessages });
 

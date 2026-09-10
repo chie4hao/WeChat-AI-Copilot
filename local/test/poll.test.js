@@ -171,6 +171,7 @@ test('增量同步：只有自己发的消息 → 入库不触发；窗口全新
   const events = [];
   b.on('new_message', e => events.push(e));
   state.markFullSynced('second', 10);
+  state.advanceCursor('second', [msg(10, 1010, 'm10', false)]);
   messagesByUser.second = [];
   for (let i = 1; i <= 11; i++) messagesByUser.second.push(msg(i, 1000 + i, `m${i}`, i % 2 === 1));   // 奇数号是自己发的
 
@@ -213,4 +214,90 @@ test('start() 会载入指纹、起定时器，stop() 能全部清掉', async ()
   assert.equal(b._catchupTimer, null);
   assert.equal(b.getStatus().running, false);
   await new Promise(r => setTimeout(r, 50));   // 让 start() 触发的那次异步轮询结束
+});
+
+test('回归：旧库 localId=83，新库 1/2/3/4 都上报，重启后不重发', async () => {
+  const b = makeBridge();
+  const old = { ...msg(83, 1000, '旧库末条', true), id: 'message_0:Msg_f:83' };
+  state.advanceCursor('filehelper-rotate', [old], { fullSynced: true });
+  const fresh = [1, 2, 3, 4].map(i => ({ ...msg(i, 2000 + i, `新${i}`, true), id: `message_4:Msg_f:${i}` }));
+  messagesByUser['filehelper-rotate'] = [old, ...fresh];
+  const events = [];
+  b.on('new_message', async e => events.push(e));
+  await b._doIncrementalSync('filehelper-rotate', 'F', false, 0);
+  assert.deepEqual(events[0].messages.map(m => m.localId), [1, 2, 3, 4]);
+  assert.equal(events[0].isFullSync, true);
+  assert.equal(state.getSyncCursor('filehelper-rotate').lastCreateTime, 2004);
+  const next = makeBridge();
+  next.on('new_message', e => events.push(e));
+  await next._doIncrementalSync('filehelper-rotate', 'F', false, 0);
+  assert.equal(events.length, 1);
+  const saved = JSON.parse(fs.readFileSync(path.join(process.env.HAKUREI_DATA_DIR, 'sync_state.json')));
+  assert.deepEqual(saved['filehelper-rotate'].keysAtLastTime, ['wcda:message_4:Msg_f:4']);
+});
+
+test('同秒跨库的消息超过窗口仍补全，localId 较小不会让分页提前停止', async () => {
+  const b = makeBridge();
+  const old = { ...msg(83, 1000, 'old', true), id: 'message_0:Msg_s:83' };
+  state.advanceCursor('same-second', [old], { fullSynced: true });
+  const fresh = Array.from({ length: 508 }, (_, i) => ({ ...msg(i + 1, 1000, `m${i}`, true), id: `message_4:Msg_s:${i + 1}` }));
+  messagesByUser['same-second'] = [msg(82, 999, 'older', true), old, ...fresh];
+  const events = [];
+  b.on('new_message', e => events.push(e));
+  await b._doIncrementalSync('same-second', 'S', false, 0);
+  assert.equal(events[0].messages.length, 508);
+  assert.equal(new Set(events[0].messages.map(m => m.messageKey)).size, 508);
+  await b._doIncrementalSync('same-second', 'S', false, 0);
+  assert.equal(events.length, 1);
+});
+
+test('旧版只有 localId 的进度迁移：保守重放，保留所有跨库消息且不触发历史 AI', async () => {
+  const b = makeBridge();
+  state.markFullSynced('legacy', 83);
+  messagesByUser.legacy = [msg(83, 1000, 'old'), msg(1, 2000, 'new')];
+  const events = [];
+  b.on('new_message', e => events.push(e));
+  await b._doIncrementalSync('legacy', 'L', false, 3000000);
+  assert.deepEqual(events[0].messages.map(m => m.localId), [83, 1]);
+  assert.equal(events[0].isFullSync, true);
+  assert.equal(state.getSyncCursor('legacy').lastCreateTime, 2000);
+});
+
+test('分页失败、实时模式回退时不交付、不推进游标', async () => {
+  const b = makeBridge();
+  const old = msg(83, 1000, 'old', true);
+  state.advanceCursor('page-error', [old], { fullSynced: true });
+  let emitted = 0;
+  b.on('new_message', () => emitted++);
+  b._fetch = async url => new URL(url).searchParams.get('offset') === '0'
+    ? { ok: true, json: async () => ({ messages: [msg(1, 2000, 'new', true)], hasMore: true }) }
+    : { ok: false, status: 503 };
+  await assert.rejects(b._doIncrementalSync('page-error', 'E', false, 0), /503/);
+  assert.equal(emitted, 0);
+  assert.equal(state.getSyncCursor('page-error').lastCreateTime, 1000);
+  b._fetch = async () => ({ ok: true, json: async () => ({ messages: [old], sourceFallback: true }) });
+  await assert.rejects(b._doIncrementalSync('page-error', 'E', false, 0), /非实时/);
+});
+
+test('等待上报完成再推进；上报失败保留旧指纹，下轮继续同步', async () => {
+  const b = makeBridge();
+  state.advanceCursor('delivery-error', [msg(83, 1000, 'old', true)], { fullSynced: true });
+  b._sig.set('delivery-error', { t: '09:00', msg: 'old', unread: 0 });
+  b._prevSnapshotAt = 1000000;
+  sessions = [sess('delivery-error', 'D', 'new', '10:00')];
+  messagesByUser['delivery-error'] = [msg(1, 2000, 'new', true)];
+  let tries = 0;
+  b.on('new_message', async () => {
+    tries++;
+    await new Promise(r => setTimeout(r, 5));
+    assert.equal(state.getSyncCursor('delivery-error').lastCreateTime, 1000);
+    if (tries === 1) throw new Error('VPS 403');
+  });
+  await b._poll('sse');
+  assert.equal(b._sig.get('delivery-error').msg, 'old');
+  assert.equal(state.getSyncCursor('delivery-error').lastCreateTime, 1000);
+  await b._poll('heartbeat');
+  assert.equal(tries, 2);
+  assert.equal(b._sig.get('delivery-error').msg, 'new');
+  assert.equal(state.getSyncCursor('delivery-error').lastCreateTime, 2000);
 });

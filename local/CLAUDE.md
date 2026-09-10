@@ -2,7 +2,7 @@
 
 在装有微信桌面版和 WeChatDataAnalysis（WCDA，2.3.0+，开启实时模式）的 Windows 电脑上常驻运行，
 把微信新消息上报到 VPS 服务端（`POST /api/sync`），并每分钟上报心跳（`POST /api/bridge/heartbeat`）。
-config.yaml、sync_state.json、image_cache.json、pending_queue.json、logs/ 都是运行时数据，已 gitignore；
+config.yaml、sync_state.json、session_sig.json、image_cache.json、pending_queue.json、logs/ 都是运行时数据，已 gitignore；
 `HAKUREI_DATA_DIR` 可以把它们指到别处（测试用）。
 
 ## 运行
@@ -24,7 +24,8 @@ service/ 的结构：计划任务 → `start_bridge.vbs`（隐藏窗口）→ `s
 | src/wechat_bridge.js | 监听 WCDA：SSE 变更事件 → 拉会话列表 → 只对指纹变化的联系人拉消息 → 转成统一格式；`getStatus()` 供心跳 |
 | src/sync_client.js | 上报 VPS：/api/sync、心跳、失败重试队列落盘、413 拆分；fetch 可注入，便于测试 |
 | src/image_analyzer.js | 图片描述 / 语音转写（Gemini），成功结果缓存到 image_cache.json，失败不缓存 |
-| src/sync_state.js | 每个联系人的同步进度 sync_state.json：`{ fullSynced, lastLocalId }` |
+| src/sync_state.js | 每个联系人的同步进度：`{ fullSynced, lastCreateTime, keysAtLastTime, lastLocalId }`，其中 localId 仅作诊断 |
+| src/message_identity.js | 完整消息标识：精确的 serverId 字符串优先，回退到 WCDA 的库:表:行 ID；比较时间游标及同秒消息 |
 | src/logger.js | console 同时写按天日志，保留 14 天 |
 | src/paths.js | 数据目录定位 |
 | src/config.js | 读 config.yaml |
@@ -44,7 +45,7 @@ service/ 的结构：计划任务 → `start_bridge.vbs`（隐藏窗口）→ `s
 - **首次见到的联系人**：没有 lastLocalId，用消息 createTime 与上一轮快照时间比较，只把更新的当新消息。
 - **首次收到对方消息**：先全量拉取该联系人的历史（isFullSync=true，VPS 只入库不触发 AI），再上报新消息触发 AI。
 - **触发规则**：system（撤回提示等）和 voip 类型即使 isSent=false 也不算对方来消息；VPS 端同样按 renderType 排除。
-- **去重**：每条消息带 localId（微信本地消息 id）和 createTime（秒），VPS 端按 localId 去重；重发、乱序都安全。
+- **去重**：每条消息带 messageKey、localId 和 createTime（秒），VPS 端优先按完整 messageKey 去重。localId 只在单个库/表内唯一，微信换库后会重置，不能用它判断消息新旧。增量同步用时间和该秒已处理的消息标识；分页必须越过游标所在整秒。上报成功或失败批次落盘后才推进进度和会话指纹。旧状态没有时间游标时，首次核对保守重放历史，由服务端去重。
 - **已读位置**：lastLocalId 在消息处理并上报之后才推进；上报失败进 pending_queue.json，30 秒重试，413 时对半拆分。
 
 ## 消息转换（_convert）

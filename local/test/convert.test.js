@@ -6,6 +6,7 @@ import path from 'node:path';
 
 process.env.HAKUREI_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-test-'));
 const { WeChatBridge, sortByTime, NON_TRIGGER_TYPES } = await import('../src/wechat_bridge.js');
+const { messageKey } = await import('../src/message_identity.js');
 
 const b = new WeChatBridge();
 b._analyzeImages = false;
@@ -13,7 +14,10 @@ b._baseUrl = 'http://127.0.0.1:1';
 const conv = (m) => b._convert({ localId: 1, createTime: 100, isSent: false, ...m }, 'wxid_x');
 
 test('文本 / 空文本', async () => {
-  assert.deepEqual(await conv({ renderType: 'text', content: '你好' }), { localId: 1, isSelf: false, createTime: 100, renderType: 'text', content: '你好' });
+  const result = await conv({ renderType: 'text', content: '你好' });
+  assert.ok(result.messageKey.startsWith('legacy:'));
+  const { messageKey: key, ...rest } = result;
+  assert.deepEqual(rest, { localId: 1, isSelf: false, createTime: 100, renderType: 'text', content: '你好' });
   assert.equal(await conv({ renderType: 'text', content: '  ' }), null);
 });
 
@@ -68,4 +72,13 @@ test('sortByTime 按 createTime 再按 localId', () => {
 test('getStatus 有完整字段', () => {
   const s = b.getStatus();
   for (const k of ['running', 'sseConnected', 'wcdaReachable', 'wcdaRealtime', 'lastPollOkAt', 'lastEventAt', 'sessions', 'fullSyncing']) assert.ok(k in s, k);
+});
+
+test('完整消息标识保留 64 位 serverId 精度，无服务端 ID 时用库:表:行', async () => {
+  const a = { serverIdStr: '9007199254740992', serverId: 9007199254740992 };
+  const c = { serverIdStr: '9007199254740993', serverId: 9007199254740992 };
+  assert.notEqual(messageKey(a), messageKey(c));
+  assert.equal((await conv({ ...c, renderType: 'text', content: '你好' })).messageKey, 'srv:9007199254740993');
+  assert.equal(messageKey({ serverIdStr: '0', id: 'message_4:Msg_x:1' }), 'wcda:message_4:Msg_x:1');
+  assert.notEqual(messageKey({ id: 'message_0:Msg_x:1' }), messageKey({ id: 'message_4:Msg_x:1' }));
 });

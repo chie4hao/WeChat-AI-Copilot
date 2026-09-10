@@ -18,15 +18,16 @@
  *   wxid:        string,
  *   name:        string,
  *   isGroup:     boolean,
- *   messages:    [{ localId, content, isSelf, createTime, renderType }],
+ *   messages:    [{ messageKey, localId, content, isSelf, createTime, renderType }],
  *   isFullSync:  boolean   // true = 只入库不触发 AI
  * }
  */
 
 import { EventEmitter } from 'events';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import { initImageAnalyzer, analyzeImage, transcribeVoice } from './image_analyzer.js';
-import { isFullSynced, getLastLocalId, markFullSynced, updateLastLocalId } from './sync_state.js';
+import { isFullSynced, getLastLocalId, getSyncCursor, advanceCursor } from './sync_state.js';
+import { messageKey, isAfterCursor } from './message_identity.js';
 import { dataFile } from './paths.js';
 
 const PAGE_SIZE = 500;                    // 全量同步每页条数（API 上限）
@@ -73,7 +74,7 @@ class WeChatBridge extends EventEmitter {
     this._wcdaFallback = null;   // WCDA 不在实时模式时 sessions 接口的回退原因
     this._wcdaDown = false;      // WCDA 连不上
     // 后台补漏队列：指纹比对可能漏掉"停机期间到达"或"同一分钟同样预览"的消息，
-    // 启动时和每隔几小时对已跟踪的联系人逐个核对一次 lastLocalId
+    // 启动时和每隔几小时对已跟踪的联系人逐个核对同步游标
     this._catchup = [];
     this._catchupTimer = null;
     this._catchupDone = 0;
@@ -114,7 +115,8 @@ class WeChatBridge extends EventEmitter {
 
   _saveSigs() {
     try {
-      writeFileSync(this._sigPath, JSON.stringify({ savedAt: Date.now(), sessions: Object.fromEntries(this._sig) }), 'utf8');
+      writeFileSync(`${this._sigPath}.tmp`, JSON.stringify({ savedAt: Date.now(), sessions: Object.fromEntries(this._sig) }), 'utf8');
+      renameSync(`${this._sigPath}.tmp`, this._sigPath);
     } catch (err) {
       console.warn('[bridge] 指纹落盘失败:', err.message);
     }
@@ -376,15 +378,15 @@ class WeChatBridge extends EventEmitter {
       if (this._ignoreGroups && s.isGroup) continue;
       const sig = { t: String(s.lastMessageTime ?? ''), msg: String(s.lastMessage ?? ''), unread: Number(s.unreadCount) || 0, name: s.name };
       const prev = this._sig.get(s.username);
-      this._sig.set(s.username, sig);
       if (prev === undefined) {
         unseen.push(s.username);
-        if (prevSnapshotAt === 0) continue;   // 完全没有历史指纹（首次运行）：只建立基线
-        changed.push(s);                      // 之后新出现的会话：当作有变化
+        if (prevSnapshotAt === 0) { this._sig.set(s.username, sig); continue; }
+        changed.push({ ...s, sig });
         continue;
       }
       // 只有未读数减少（用户在微信里看了一眼）不算变化，避免白拉一次很慢的 messages 接口
-      if (prev.t !== sig.t || prev.msg !== sig.msg || sig.unread > prev.unread) changed.push(s);
+      if (prev.t !== sig.t || prev.msg !== sig.msg || sig.unread > prev.unread) changed.push({ ...s, sig });
+      else this._sig.set(s.username, sig);
     }
     this._saveSigs();
 
@@ -409,6 +411,9 @@ class WeChatBridge extends EventEmitter {
     for (const s of changed) {
       try {
         await this._doIncrementalSync(s.username, s.name, s.isGroup, sinceMs);
+        // 拉取或上报失败时保留旧指纹，下轮继续处理，不能先把变化吃掉。
+        this._sig.set(s.username, s.sig);
+        this._saveSigs();
       } catch (err) {
         console.error(`[bridge] ${s.name}(${s.username}) 同步出错:`, err.message);
       }
@@ -419,100 +424,67 @@ class WeChatBridge extends EventEmitter {
     return !m.isSent && !NON_TRIGGER_TYPES.has(m.renderType);
   }
 
-  _emit(username, name, isGroup, messages, isFullSync) {
+  async _emit(username, name, isGroup, messages, isFullSync) {
     if (!messages.length) return;
-    this.emit('new_message', { wxid: username, name, isGroup, messages, isFullSync });
+    const event = { wxid: username, name, isGroup, messages, isFullSync };
+    await Promise.all(this.rawListeners('new_message').map(listener => listener.call(this, event)));
   }
 
   // ── 增量同步（某个联系人有变化时） ─────────────────────────────────────
 
   async _doIncrementalSync(username, name, isGroup, sinceMs) {
     const lastSeen = getLastLocalId(username);
+    const cursor = getSyncCursor(username);
     const t0 = Date.now();
-    const res = await this._fetch(
-      `${this._baseUrl}/api/chat/messages?username=${encodeURIComponent(username)}` +
-      `&source=realtime&limit=${this._contextLimit}&order=asc`
-    );
-    if (!res.ok) {
-      console.warn(`[bridge] ${name}: messages 接口返回 ${res.status}`);
-      return;
-    }
-    const { messages } = await res.json();
-    if (!messages?.length) return;
-    const maxLocalId = Math.max(...messages.map(m => m.localId));
-
-    let newMessages;
-    if (lastSeen === -1) {
-      // 首次见到：没有本地已读位置，用时间判断——比上一轮快照早的都是旧消息
-      newMessages = messages.filter(m => m.createTime * 1000 > sinceMs);
+    const first = await this._fetchMessagePage(username, this._contextLimit, 0);
+    if (!first.messages.length) return;
+    const migrating = lastSeen !== -1 && !cursor;
+    let newMessages = first.messages;
+    if (lastSeen === -1 && !cursor) {
+      newMessages = first.messages.filter(m => m.createTime * 1000 > sinceMs);
       if (!newMessages.length) {
-        updateLastLocalId(username, maxLocalId);
-        console.log(`[bridge] ${name}: 首次见到，记录基线 localId=${maxLocalId}（${Date.now() - t0}ms）`);
+        advanceCursor(username, first.messages);
+        console.log(`[bridge] ${name}: 首次见到，记录消息时间基线（${Date.now() - t0}ms）`);
         return;
       }
     } else {
-      if (maxLocalId <= lastSeen) return;
-      // 返回的全是新消息且填满了窗口：可能有更早的缺口（离线期间消息超过 context_limit 条），分页补拉
-      if (messages.every(m => m.localId > lastSeen) && messages.length >= this._contextLimit) {
-        await this._fillGap(username, name, isGroup, lastSeen);
-        return;
-      }
-      newMessages = messages.filter(m => m.localId > lastSeen);
+      // 旧版只有 localId，无法知道它属于哪个消息库。首次迁移保守重放历史，服务端去重。
+      if (migrating) console.log(`[bridge] ${name}: 迁移旧 localId 游标，核对历史消息`);
+      newMessages = await this._fillGap(username, cursor, first);
     }
+    if (!newMessages.length) return;
 
-    const hasIncoming = newMessages.some(m => this._isTriggering(m));
+    const hasIncoming = newMessages.some(m => this._isTriggering(m) && (!migrating || m.createTime * 1000 > sinceMs));
     console.log(`[bridge] ${name}: ${newMessages.length} 条新消息${hasIncoming ? '' : '（无对方消息）'}（${Date.now() - t0}ms）`);
-
-    if (!hasIncoming && !this._debugSelfTrigger) {
-      // 只有自己发的（或撤回提示等）：上传入库但不触发 AI
-      this._emit(username, name, isGroup, await this._processMessages(newMessages, username), true);
-      updateLastLocalId(username, maxLocalId);
-      return;
-    }
-    if (!hasIncoming) console.log(`[bridge] debug: ${name} 新消息全为自发，仍触发（self_trigger）`);
-
-    // 收到对方消息且从未全量同步过 → 先补录历史（图片/语音进缓存，下面不会重复调 Gemini）
-    await this._ensureFullSynced(username, name, isGroup);
-
-    this._emit(username, name, isGroup, await this._processMessages(newMessages, username), false);
-    // 已读位置在处理和上报之后再推进；全量同步成功时已写入更大的值，取大者
-    updateLastLocalId(username, Math.max(maxLocalId, getLastLocalId(username)));
+    const trigger = hasIncoming || (!migrating && this._debugSelfTrigger);
+    if (trigger && !migrating) await this._ensureFullSynced(username, name, isGroup);
+    await this._emit(username, name, isGroup, await this._processMessages(newMessages, username), !trigger);
+    advanceCursor(username, newMessages, migrating ? { fullSynced: true } : {});
   }
 
-  // ── 缺口补拉（本地端离线期间消息超过 context_limit 条） ──────────────
+  async _fetchMessagePage(username, limit, offset) {
+    const res = await this._fetch(`${this._baseUrl}/api/chat/messages?username=${encodeURIComponent(username)}` +
+      `&source=realtime&limit=${limit}&offset=${offset}&order=asc`);
+    if (!res.ok) throw new Error(`messages 接口返回 ${res.status}`);
+    const data = await res.json();
+    if (data.sourceFallback || (data.source && data.source !== 'realtime')) throw new Error('messages 接口回退到非实时模式');
+    if (!Array.isArray(data.messages) || (!data.messages.length && data.hasMore)) throw new Error('messages 分页结果不完整');
+    return data;
+  }
 
-  async _fillGap(username, name, isGroup, lastSeen) {
-    console.log(`[bridge] ${name}: 检测到消息缺口（lastSeen=${lastSeen}），分页补拉`);
-
-    let all = [];
+  // 页是从新到旧取的，必须越过游标所在整秒，不能因某个 localId 较小就提前停下。
+  async _fillGap(username, cursor, first) {
+    let data = first;
     let offset = 0;
+    const found = new Map();
     while (true) {
-      const res = await this._fetch(
-        `${this._baseUrl}/api/chat/messages?username=${encodeURIComponent(username)}` +
-        `&source=realtime&limit=${PAGE_SIZE}&offset=${offset}&order=asc`
-      );
-      if (!res.ok) break;
-      const data = await res.json();
-      const page = data.messages ?? [];
-      if (!page.length) break;
-      all = all.concat(page);
-      if (!data.hasMore) break;
-      // offset 从最新一条往旧数：这一页里最早的一条已不比 lastSeen 新，说明缺口已覆盖
-      if (Math.min(...page.map(m => m.localId)) <= lastSeen) break;
-      offset += PAGE_SIZE;
+      for (const m of data.messages) if (isAfterCursor(m, cursor)) found.set(messageKey(m), m);
+      if (!data.hasMore || !data.messages.length) break;
+      if (cursor && Math.min(...data.messages.map(m => m.createTime)) < cursor.lastCreateTime) break;
+      offset += data.messages.length;
+      data = await this._fetchMessagePage(username, PAGE_SIZE, offset);
     }
-
-    const newMessages = sortByTime(all.filter(m => m.localId > lastSeen));
-    if (!newMessages.length) return;
-    const maxLocalId = Math.max(...newMessages.map(m => m.localId));
-    const hasIncoming = newMessages.some(m => this._isTriggering(m));
-
-    if (hasIncoming) await this._ensureFullSynced(username, name, isGroup);
-
-    const processed = await this._processMessages(newMessages, username);
-    console.log(`[bridge] ${name}: 补拉完成，共 ${newMessages.length} 条缺失消息`);
-    this._emit(username, name, isGroup, processed, !hasIncoming);  // 全是自发消息则不触发 AI
-    updateLastLocalId(username, Math.max(maxLocalId, getLastLocalId(username)));
+    return sortByTime([...found.values()]);
   }
 
   // ── 全量同步（首次收到对方消息时补录全部历史） ─────────────────────────
@@ -522,8 +494,6 @@ class WeChatBridge extends EventEmitter {
     this._fullSyncingNow.add(username);
     try {
       await this._doFullSync(username, name, isGroup);
-    } catch (err) {
-      console.error(`[bridge] ${name}: 全量同步失败:`, err.message);
     } finally {
       this._fullSyncingNow.delete(username);
     }
@@ -532,39 +502,12 @@ class WeChatBridge extends EventEmitter {
   async _doFullSync(username, name, isGroup) {
     console.log(`[bridge] ${name}: 开始全量同步历史`);
 
-    let all = [];
-    let offset = 0;
-    let complete = false;
-    while (true) {
-      const res = await this._fetch(
-        `${this._baseUrl}/api/chat/messages?username=${encodeURIComponent(username)}` +
-        `&source=realtime&limit=${PAGE_SIZE}&offset=${offset}&order=asc`
-      );
-      if (!res.ok) break;
-      const data = await res.json();
-      const page = data.messages ?? [];
-      if (!page.length) { complete = true; break; }
-      all = all.concat(page);
-      if (!data.hasMore) { complete = true; break; }
-      offset += PAGE_SIZE;
-    }
-
-    if (!complete) {
-      console.warn(`[bridge] ${name}: 全量同步分页中断（已取 ${all.length} 条），本次不标记，下次收到消息时重试`);
-      return;
-    }
-    if (!all.length) {
-      markFullSynced(username, -1);
-      return;
-    }
-
-    // 分页是从最新往旧取的，各页内部升序、页与页之间降序，整体排一次序再上报
-    const sorted = sortByTime(all);
-    const maxLocalId = Math.max(...sorted.map(m => m.localId));
+    const first = await this._fetchMessagePage(username, PAGE_SIZE, 0);
+    const sorted = await this._fillGap(username, null, first);
     const processed = await this._processMessages(sorted, username);
     console.log(`[bridge] ${name}: 全量同步 ${sorted.length} 条历史消息`);
-    this._emit(username, name, isGroup, processed, true);
-    markFullSynced(username, maxLocalId);
+    await this._emit(username, name, isGroup, processed, true);
+    advanceCursor(username, sorted, { fullSynced: true });
   }
 
   // ── 消息转换（文本保留，图片/语音转文字，其余转带信息的占位） ───────────
@@ -576,7 +519,7 @@ class WeChatBridge extends EventEmitter {
   }
 
   async _convert(m, username) {
-    const base = { localId: m.localId, isSelf: !!m.isSent, createTime: m.createTime, renderType: m.renderType };
+    const base = { messageKey: messageKey(m), localId: m.localId, isSelf: !!m.isSent, createTime: m.createTime, renderType: m.renderType };
 
     switch (m.renderType) {
       case 'text':

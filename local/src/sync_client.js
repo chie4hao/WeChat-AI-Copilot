@@ -3,15 +3,15 @@
  *
  * 负责把桥接产出的消息批次 POST 到 VPS（/api/sync），以及定时上报心跳（/api/bridge/heartbeat）。
  *
- * - 消息带 localId + createTime，VPS 端按它们去重，重发、乱序到达都安全
+ * - 消息带 messageKey + localId + createTime，VPS 优先按完整 messageKey 去重
  * - 上报失败（网络错误 / 5xx / 超时）进重试队列并落盘（pending_queue.json），30 秒后重试，重启不丢
- * - 4xx 是配置类错误（secret 不匹配等），重试无意义，丢弃并提示
+ * - 首次上报遇到 4xx 时向桥接抛错，保留旧游标和会话指纹，修好配置后继续同步
  * - 413（请求体过大）对半拆开重发，前半段不触发 AI，由后半段决定
  *
  * fetchImpl 可注入，方便测试。
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 
 export class SyncClient {
   constructor({
@@ -54,11 +54,8 @@ export class SyncClient {
 
   _saveQueue() {
     if (!this.queuePath) return;
-    try {
-      writeFileSync(this.queuePath, JSON.stringify(Object.fromEntries(this.pending)), 'utf8');
-    } catch (err) {
-      this.log.error('[sync] 重试队列写盘失败:', err.message);
-    }
+    writeFileSync(`${this.queuePath}.tmp`, JSON.stringify(Object.fromEntries(this.pending)), 'utf8');
+    renameSync(`${this.queuePath}.tmp`, this.queuePath);
   }
 
   stats() {
@@ -221,7 +218,7 @@ export class SyncClient {
         // 网络错误 / 超时（无 status）或 5xx 入队重试；4xx 配置类错误不重试
         if (!err.status || err.status >= 500) {
           this.enqueueFailed({ wxid, name, isGroup, messages: toSend.slice(i), skipAi });
-        }
+        } else throw err; // 无法上报也未落盘，桥接不能推进游标和指纹。
         break;
       }
     }

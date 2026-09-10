@@ -61,7 +61,7 @@ test('413 对半拆分重发，前半段不触发 AI', async () => {
   assert.equal(c.stats().messages, 0);
 });
 
-test('5xx / 网络错误进队列并落盘，重试成功后清空；4xx 直接丢弃', async () => {
+test('5xx / 网络错误进队列并落盘；4xx 向桥接抛错，禁止推进游标', async () => {
   const queuePath = path.join(dir, 'q4.json');
   const { fetchImpl, requests } = fakeFetch([{ status: 502, text: 'bad gateway' }, ok()]);
   const c = new SyncClient({ vpsUrl: 'http://vps', secret: 's', queuePath, fetchImpl, log: quiet, retryIntervalMs: 3_600_000 });
@@ -88,7 +88,7 @@ test('5xx / 网络错误进队列并落盘，重试成功后清空；4xx 直接�
 
   const bad = fakeFetch([{ status: 403, text: 'Forbidden' }]);
   const c4 = new SyncClient({ vpsUrl: 'http://vps', secret: 's', queuePath: path.join(dir, 'q6.json'), fetchImpl: bad.fetchImpl, log: quiet });
-  await c4.handleEvent(event(mk(1)));
+  await assert.rejects(c4.handleEvent(event(mk(1))), /403/);
   assert.equal(c4.stats().messages, 0, '4xx 不入队');
 });
 

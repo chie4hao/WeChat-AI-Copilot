@@ -5,3 +5,5 @@ image_cache.json
 pending_queue.json
 logs/
 bridge.pid
+session_sig.json
+*.json.tmp

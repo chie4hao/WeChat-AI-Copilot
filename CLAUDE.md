@@ -27,7 +27,7 @@
 - [x] 导入页面（import.html）— 解析微信聊天记录格式，批量导入，自动识别"我"
 - [x] 联系人管理（新建 / 改名 / 编辑资料 / 清空记录 / 删除，右键或长按联系人）
 - [x] 消息管理（编辑 / 切换方向 / 删除 / "以此为止获取建议"复盘，右键或长按消息）
-- [x] 本地端实时同步 `/api/sync`（按微信 localId 去重，新消息实时推到打开的聊天窗口）
+- [x] 本地端实时同步 `/api/sync`（按完整消息标识去重，支持微信换库后 localId 重置）
 - [x] Web Push 通知（VAPID，AI 建议生成后推送到手机，点通知直达该联系人）
 - [x] 三 provider：Claude Code（Max 订阅）/ Claude API（可走反代）/ Gemini；设置页"测试连接"
 - [x] 系统状态卡：本地端心跳 `/api/bridge/heartbeat`、状态接口 `/api/status`、离线与 token 到期推送
@@ -160,9 +160,10 @@ prompt: |
 | timestamp | INTEGER | 毫秒时间戳 |
 | type | TEXT | `'text'`；本地端同步的消息存微信 renderType（image/voice/quote/system/link…） |
 | wechat_create_time | INTEGER | 微信消息时间（秒），仅同步消息有 |
-| local_id | INTEGER | 微信本地消息 id，仅同步消息有；`(contact_id, local_id)` 唯一，是去重依据 |
+| local_id | INTEGER | 微信本地消息 id，仅在单个库/表内唯一，换库后会重置 |
+| message_key | TEXT | 精确的微信 serverId 字符串或 WCDA 库:表:行标识；`(contact_id, message_key)` 唯一（非 NULL） |
 
-**去重规则（syncMessages）**：带 local_id 的消息按 local_id 去重；没有 local_id 的旧行或旧版本地端发来的消息按"同秒同内容"兜底。
+**去重规则（syncMessages）**：新消息按完整 message_key 去重；重放旧数据时按时间、方向及 local_id/内容匹配无键旧行，并补上 message_key，保留用户编辑后的内容。旧客户端没有 messageKey 时按时间、方向和 localId/内容兼容去重。
 微信时间戳精度只有秒，早期只按 `(contact_id, wechat_create_time)` 去重会吞掉同一秒内的第二条消息，已改掉。
 
 **ai_sessions**（每个联系人唯一，对方发新消息时 reset，旧记录删除重建）
@@ -308,13 +309,13 @@ POST /api/sync   header: X-Secret: <server.sync_secret>
 {
   wxid, name, isGroup,
   skipAi,                 // true = 只入库不触发 AI（全量补录历史、自己发的消息）
-  messages: [{ localId, content, isSelf, createTime /*秒*/, renderType }],
+  messages: [{ messageKey, localId, content, isSelf, createTime /*秒*/, renderType }],
   syncedAt
 }
 → { ok, inserted, triggered }
 ```
 
-服务端流程：`upsertContact` → `syncMessages`（按 localId 去重，返回新插入行）→ 广播 `contacts_update` +
+服务端流程：`upsertContact` → `syncMessages`（按完整消息标识去重，返回新插入行）→ 广播 `contacts_update` +
 `message`/`messages_reload` → 若 `!skipAi` 且最后一条非 system 类型的消息是对方发的 → `triggerAi`。
 system 类型（"xx撤回了一条消息"等）isSelf 也可能是 false，判断触发时必须跳过。
 `express.json` 上限已放宽到 20mb（一批 200 条带图片描述的消息会超过默认的 100kb）。
@@ -505,7 +506,7 @@ npm --prefix local test  # local/test：消息转换、会话指纹与增量判�
 - **`contactId` 类型**：数据库返回 Number，WebSocket 事件中也是 Number，前端比较时注意不要用字符串
 - **settings 保存合并逻辑**：`POST /api/settings` 用 `Object.assign({}, current.server, incoming.server)` 合并，certPath 等不会被前端表单覆盖丢失
 - **数据库迁移**：`initSchema()` 里用 `PRAGMA table_info` 判断缺列再 ALTER，启动即迁移；改 schema 前先 `cp data.db data.db.bak`，可用 `COPILOT_DB_PATH=/tmp/copy.db node ...` 在副本上先跑一遍
-- **同步去重只认 localId**：不要再加按时间戳的唯一索引，微信时间戳只有秒级精度
+- **同步去重使用完整消息标识**：localId 在微信换库后会从 1 重置，不能作为会话级唯一键，也不能用数值大小判断新旧。不要加按时间戳的唯一索引，微信时间戳只有秒级精度；时间游标必须记录同秒的所有已处理消息标识。
 - **设置页的 Claude 接入方式**：② 区块是"clewdr 反代 / 官方 API"二选一，底层仍是同一组 `claude.*` 字段：有 `base_url` 就是反代模式（密钥框填 clewdr 的 password），没有就是官方 API。clewdr 的 `/code` 通道靠 `claude_code.oauth_token` 工作，token 到期后重跑仓库外的 restore_clewdr.sh
 - **模型列表**（2026-09）：claude-fable-5-1（最强，$10/$50，思考始终开启，禁止传 thinking disabled / budget_tokens）、claude-opus-5（默认，$5/$25）、claude-fable-5、claude-sonnet-5（$2/$10）、claude-haiku-4-5（无 effort）、4.8 / 4.7 / 4.6 旧版（4.6 与反代都没有 xhigh，代码里自动降 high）。所有 4.6+ 模型都不支持 assistant 预填，格式靠 output_config 保证
 - **better-sqlite3 Windows 安装失败**：换 `sql.js`（异步 API，需要改 db.js）

@@ -10,8 +10,9 @@ const Database = (await import('better-sqlite3')).default;
   const old = new Database(process.env.COPILOT_DB_PATH);
   old.exec(`
     CREATE TABLE contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, wxid TEXT UNIQUE NOT NULL, name TEXT NOT NULL, avatar TEXT, notes TEXT, last_message TEXT, last_time INTEGER, has_pending_suggestion INTEGER DEFAULT 0);
-    CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact_id INTEGER NOT NULL, content TEXT NOT NULL, is_self INTEGER NOT NULL DEFAULT 0, timestamp INTEGER NOT NULL, type TEXT NOT NULL DEFAULT 'text', wechat_create_time INTEGER, FOREIGN KEY (contact_id) REFERENCES contacts(id));
+    CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, contact_id INTEGER NOT NULL, content TEXT NOT NULL, is_self INTEGER NOT NULL DEFAULT 0, timestamp INTEGER NOT NULL, type TEXT NOT NULL DEFAULT 'text', wechat_create_time INTEGER, local_id INTEGER, FOREIGN KEY (contact_id) REFERENCES contacts(id));
     CREATE UNIQUE INDEX idx_messages_dedup ON messages (contact_id, wechat_create_time) WHERE wechat_create_time IS NOT NULL;
+    CREATE UNIQUE INDEX idx_messages_local_id ON messages (contact_id, local_id) WHERE local_id IS NOT NULL;
     CREATE TABLE ai_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, contact_id INTEGER NOT NULL UNIQUE, created_at INTEGER NOT NULL);
     CREATE TABLE ai_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, type TEXT NOT NULL CHECK(type IN ('ai_round','user')), content TEXT NOT NULL, created_at INTEGER NOT NULL);
     INSERT INTO contacts (wxid, name, last_time) VALUES ('wxid_a', 'Alice', 101000);
@@ -27,7 +28,8 @@ const raw = db.getDb();
 test('旧库迁移：删掉按秒唯一索引，补上 local_id / name_manual / cc_session_id / kv', () => {
   const idx = raw.prepare('PRAGMA index_list(messages)').all().map(r => r.name);
   assert.ok(!idx.includes('idx_messages_dedup'), '旧索引应被删除');
-  assert.ok(idx.includes('idx_messages_local_id'));
+  assert.ok(!idx.includes('idx_messages_local_id'), '跨库会重置 localId，旧唯一索引应删除');
+  assert.ok(idx.includes('idx_messages_key'));
   assert.ok(raw.prepare('PRAGMA table_info(messages)').all().some(r => r.name === 'local_id'));
   assert.ok(raw.prepare('PRAGMA table_info(contacts)').all().some(r => r.name === 'name_manual'));
   assert.ok(raw.prepare('PRAGMA table_info(ai_sessions)').all().some(r => r.name === 'cc_session_id'));
@@ -106,4 +108,28 @@ test('getMessagesUpTo 复盘截断', () => {
   assert.equal(upto.length, 3);
   assert.equal(upto[2].id, mid.id);
   assert.equal(db.getMessagesUpTo(contactId, 999999), null);
+});
+
+test('换库后 localId 重复仍入库；完整标识重传、同秒不同消息正确去重', () => {
+  const c = db.upsertContact({ wxid: 'rotate', name: 'Rotate' });
+  const a = { ...msg(1, 1000, '你好', true), messageKey: 'srv:9007199254740992' };
+  const b = { ...msg(1, 2000, '你好', true), messageKey: 'srv:9007199254740993' };
+  const d = { ...b, messageKey: 'wcda:message_5:Msg_x:1' };
+  assert.equal(db.syncMessages({ contactId: c.id, messages: [a, b, d] }).inserted, 3);
+  assert.equal(db.syncMessages({ contactId: c.id, messages: [b, a, d] }).inserted, 0);
+  assert.equal(db.getRecentMessages(c.id).length, 3);
+  assert.equal(db.getContactByWxid('rotate').last_time, 2000000);
+});
+
+test('旧客户端重用 localId 时按时间区分；新标识接管旧行不覆盖已编辑内容', () => {
+  const c = db.upsertContact({ wxid: 'legacy-rotate', name: 'Legacy' });
+  const a = msg(1, 3000, '旧消息', true);
+  const b = msg(1, 4000, '新消息', true);
+  assert.equal(db.syncMessages({ contactId: c.id, messages: [a, b] }).inserted, 2);
+  const original = db.getRecentMessages(c.id)[0];
+  db.updateMessage(original.id, { content: '手动编辑后的内容' });
+  const keyed = { ...a, messageKey: 'srv:1234567890123456789' };
+  assert.equal(db.syncMessages({ contactId: c.id, messages: [keyed, keyed, b] }).inserted, 0);
+  assert.equal(db.getRecentMessages(c.id)[0].content, '手动编辑后的内容');
+  assert.equal(raw.prepare('SELECT message_key FROM messages WHERE id=?').get(original.id).message_key, keyed.messageKey);
 });

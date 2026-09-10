@@ -95,3 +95,22 @@ test('provider-status 与 settings 读写（换 token 自动记日期）', async
   assert.match(cfg2.claude_code.token_created_at, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(cfg2.server.sync_secret, 'test-secret', 'server 字段合并保留');
 });
+
+test('HTTP 回归：跨库复用 localId 后完整入库，重传零新增且不触发 AI', async () => {
+  const extra = { wxid: 'filehelper', name: '文件传输助手' };
+  const old = { localId: 1, createTime: base_ct - 10, content: '旧库消息', isSelf: true, renderType: 'text' };
+  assert.equal((await sync([old], extra)).data.inserted, 1);
+  const messages = Array.from({ length: 4 }, (_, i) => ({
+    localId: i + 1, messageKey: `srv:682456380753473335${i}`,
+    createTime: base_ct + i, content: `新库消息${i + 1}`, isSelf: true, renderType: 'text',
+  }));
+  const uploaded = await sync(messages, extra);
+  assert.equal(uploaded.status, 200);
+  assert.equal(uploaded.data.inserted, 4);
+  assert.equal(uploaded.data.triggered, false);
+  assert.equal((await sync(messages, extra)).data.inserted, 0);
+  const contact = (await json('/api/contacts')).data.find(c => c.wxid === 'filehelper');
+  const stored = (await json(`/api/contacts/${contact.id}/messages`)).data;
+  assert.equal(stored.length, 5);
+  assert.deepEqual(stored.filter(m => m.message_key).map(m => m.message_key).sort(), messages.map(m => m.messageKey).sort());
+});

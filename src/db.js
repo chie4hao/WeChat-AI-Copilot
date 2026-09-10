@@ -41,6 +41,7 @@ function initSchema() {
       type TEXT NOT NULL DEFAULT 'text',
       wechat_create_time INTEGER,
       local_id INTEGER,
+      message_key TEXT,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
   `);
@@ -49,15 +50,16 @@ function initSchema() {
   const msgCols = db.prepare('PRAGMA table_info(messages)').all().map(r => r.name);
   if (!msgCols.includes('wechat_create_time')) db.exec('ALTER TABLE messages ADD COLUMN wechat_create_time INTEGER');
   if (!msgCols.includes('local_id'))           db.exec('ALTER TABLE messages ADD COLUMN local_id INTEGER');
+  if (!msgCols.includes('message_key'))        db.exec('ALTER TABLE messages ADD COLUMN message_key TEXT');
   const contactCols = db.prepare('PRAGMA table_info(contacts)').all().map(r => r.name);
   if (!contactCols.includes('name_manual'))    db.exec('ALTER TABLE contacts ADD COLUMN name_manual INTEGER DEFAULT 0');
 
-  // 去重改为按微信本地消息 id（local_id）。旧的 (contact_id, wechat_create_time) 唯一索引精度只有秒，
-  // 同一秒内的多条消息会被它吞掉，必须删掉；没有 local_id 的旧行在 syncMessages 里按"同秒同内容"兜底去重。
+  // local_id 只在单个消息库/表内唯一。换库后会从 1 重新开始，不能用作会话级唯一键。
   db.exec(`
     DROP INDEX IF EXISTS idx_messages_dedup;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id
-      ON messages (contact_id, local_id) WHERE local_id IS NOT NULL;
+    DROP INDEX IF EXISTS idx_messages_local_id;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_key
+      ON messages (contact_id, message_key) WHERE message_key IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_messages_contact_time
       ON messages (contact_id, wechat_create_time);
     CREATE INDEX IF NOT EXISTS idx_messages_contact_ts
@@ -232,29 +234,30 @@ function insertMessage({ contactId, content, isSelf, timestamp, type = 'text' })
 
 /**
  * 批量同步来自本地端的消息，自动去重。
- * messages 格式: [{ localId?, content, isSelf, createTime(Unix秒), renderType }]
+ * messages 格式: [{ messageKey?, localId?, content, isSelf, createTime(Unix秒), renderType }]
  * 返回 { inserted, rows }，rows 是实际新插入的行（供广播给前端）。
  *
  * 去重规则：
- *   - 带 localId：库里已有同 local_id 的行，或有"无 local_id 且同秒同内容"的旧行 → 跳过
- *   - 不带 localId（旧版本地端）：库里已有同秒同内容的行 → 跳过
- * 微信时间戳精度只有秒，所以不能单靠它去重，否则同一秒内的多条消息会丢。
+ *   - 新消息按 messageKey（微信服务端 ID 字符串，或 WCDA 的库:表:行 ID）去重。
+ *   - 重放旧数据时按时间、方向及 localId/内容匹配无键旧行，为其补上 messageKey。
+ *   - 旧客户端没有 messageKey 时，localId 必须与时间一起匹配，避免跨库冲突。
  */
 function syncMessages({ contactId, messages }) {
   const db = getDb();
 
+  const findKey = db.prepare('SELECT id FROM messages WHERE contact_id = ? AND message_key = ?');
+  const findLegacy = db.prepare(`
+    SELECT id FROM messages
+    WHERE contact_id = @contactId AND wechat_create_time = @wechatCreateTime AND is_self = @isSelf
+      AND (@messageKey IS NULL OR message_key IS NULL)
+      AND ((@localId IS NOT NULL AND local_id = @localId)
+        OR ((local_id IS NULL OR @localId IS NULL) AND content = @content))
+    ORDER BY id LIMIT 1
+  `);
+  const adoptKey = db.prepare('UPDATE messages SET message_key = ?, local_id = COALESCE(local_id, ?) WHERE id = ?');
   const insert = db.prepare(`
-    INSERT INTO messages (contact_id, content, is_self, timestamp, type, wechat_create_time, local_id)
-    SELECT @contactId, @content, @isSelf, @timestamp, @type, @wechatCreateTime, @localId
-    WHERE NOT EXISTS (
-      SELECT 1 FROM messages
-      WHERE contact_id = @contactId
-        AND (
-          (@localId IS NOT NULL AND local_id = @localId)
-          OR ((local_id IS NULL OR @localId IS NULL)
-              AND wechat_create_time = @wechatCreateTime AND content = @content)
-        )
-    )
+    INSERT INTO messages (contact_id, content, is_self, timestamp, type, wechat_create_time, local_id, message_key)
+    VALUES (@contactId, @content, @isSelf, @timestamp, @type, @wechatCreateTime, @localId, @messageKey)
   `);
 
   // 只用更新的消息刷新预览，补传的旧消息不会把预览和排序拉回去
@@ -271,7 +274,15 @@ function syncMessages({ contactId, messages }) {
       const content = m.content || '';
       const isSelf = m.isSelf ? 1 : 0;
       const localId = Number.isInteger(m.localId) ? m.localId : null;
-      const result = insert.run({ contactId, content, isSelf, timestamp, type, wechatCreateTime: m.createTime, localId });
+      const messageKey = typeof m.messageKey === 'string' && m.messageKey.trim() ? m.messageKey : null;
+      if (messageKey && findKey.get(contactId, messageKey)) continue;
+      const values = { contactId, content, isSelf, timestamp, type, wechatCreateTime: m.createTime, localId, messageKey };
+      const legacy = findLegacy.get(values);
+      if (legacy) {
+        if (messageKey) adoptKey.run(messageKey, localId, legacy.id);
+        continue;
+      }
+      const result = insert.run(values);
       if (result.changes > 0) {
         rows.push({ id: Number(result.lastInsertRowid), contact_id: contactId, content, is_self: isSelf, timestamp, type });
       }
