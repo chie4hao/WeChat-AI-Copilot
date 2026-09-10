@@ -13,8 +13,13 @@ npm run service:install      # 注册 Windows 计划任务：登录后 30s 隐�
 npm run service:status       # 计划任务 / 监督进程 / node 进程 / 最近日志
 npm run service:stop | service:start | service:uninstall
 ```
-service/ 的结构：计划任务 → `start_bridge.vbs`（隐藏窗口）→ `supervisor.ps1`（循环拉起 `node src/index.js`，
-10 秒内崩溃则等 30 秒再试，pid 写在 bridge.pid）。改了 src 后 `service:stop` 再 `service:start`。
+service/ 的结构：Windows 计划任务 → `start_bridge.vbs`（隐藏窗口，等待并返回退出码）→ `supervisor.ps1` → node。
+VBS 必须保持运行，让计划任务的 Running 状态覆盖守护进程的生命周期。Windows 每分钟触发一次检查，正常运行时 IgnoreNew 不创建重复实例，退出后重新拉起；同时保留失败重试设置。
+node 退出由守护进程等待 5 秒再启动，10 秒内崩溃则等 30 秒；项目目录互斥锁防止重复实例，pid 写在 bridge.pid。
+`service:start` 优先使用 Start-ScheduledTask，让 Windows 服务创建进程，避免继承终端或 Codex 的进程作业，随宿主退出被清理。
+`service:stop` 先暂停计划任务（包括自启和周期检查），再按本项目完整脚本路径清理进程；`service:start` 重新启用任务。不能全局匹配 `src/index.js` 杀 node。
+改了 src 后 `service:stop` 再 `service:start`；更改计划任务设置后运行 `service:install`。
+2026-09-10 的离线故障：心跳在 17:12 中断，守护进程和 node 同时消失，Codex 于 17:12:41 重启；旧的直接后台启动可能随宿主一起被清理，旧任务又没有守护进程失败恢复。
 
 ## 文件
 
@@ -30,6 +35,7 @@ service/ 的结构：计划任务 → `start_bridge.vbs`（隐藏窗口）→ `s
 | src/paths.js | 数据目录定位 |
 | src/config.js | 读 config.yaml |
 | test/ | `npm test`：convert（消息转换）、poll（指纹比对与增量判定，用假 WCDA）、sync_client（上报与队列） |
+| test/service.test.ps1 | `npm run test:service`：Windows 隔离计划任务与虚拟 Node，验证启动、重复启动、node/守护进程崩溃恢复、精确停止及停止后不重启（约 3 分钟） |
 
 ## 关键机制
 

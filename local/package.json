@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node --test \"test/**/*.test.js\"",
+    "test:service": "powershell -NoProfile -ExecutionPolicy Bypass -File test/service.test.ps1",
     "service:install": "powershell -NoProfile -ExecutionPolicy Bypass -File service/install_service.ps1",
     "service:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File service/uninstall_service.ps1",
     "service:start": "powershell -NoProfile -ExecutionPolicy Bypass -File service/start_bridge.ps1",
